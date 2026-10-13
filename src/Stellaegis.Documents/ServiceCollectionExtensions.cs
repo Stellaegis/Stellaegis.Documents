@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Stellaegis.Documents.InMemory;
+using Stellaegis.Primitives;
 
 namespace Stellaegis.Documents;
 
@@ -10,19 +12,20 @@ namespace Stellaegis.Documents;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the document domain service layer (<see cref="IDocumentService"/>). Requires an
-    /// <see cref="IDocumentStore"/> and an <c>IBlobStore</c> to be registered (via an InMemory/PostgreSQL
-    /// store and a blob adapter).
+    /// Registers the document domain service layer (<see cref="IDocumentService"/>), configured from
+    /// <paramref name="sectionName"/>. Requires an <see cref="IDocumentStore"/> and an <c>IBlobStore</c>
+    /// to be registered (via an InMemory/PostgreSQL store and a blob adapter).
     /// </summary>
     /// <remarks>Called automatically by <see cref="AddStellaegisDocumentsInMemory"/> and the PostgreSQL variant.</remarks>
     public static IServiceCollection AddStellaegisDocumentsServices(
         this IServiceCollection services,
-        Action<DocumentsOptions>? configure = null)
+        IConfiguration configuration,
+        string sectionName = DocumentsOptions.SectionName)
     {
-        var options = services.AddOptions<DocumentsOptions>();
-        if (configure is not null)
-            options.Configure(configure);
+        Guard.NotNull(configuration);
+        Guard.NotWhiteSpace(sectionName);
 
+        services.Configure<DocumentsOptions>(configuration.GetSection(sectionName));
         services.TryAddScoped<IDocumentService, DocumentService>();
         return services;
     }
@@ -33,10 +36,11 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddStellaegisDocumentsInMemory(
         this IServiceCollection services,
-        Action<DocumentsOptions>? configure = null)
+        IConfiguration configuration,
+        string sectionName = DocumentsOptions.SectionName)
     {
         services.TryAddSingleton<IDocumentStore, InMemoryDocumentStore>();
-        services.AddStellaegisDocumentsServices(configure);
+        services.AddStellaegisDocumentsServices(configuration, sectionName);
         return services;
     }
 }

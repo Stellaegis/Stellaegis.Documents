@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -14,13 +15,14 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddStellaegisDocumentsPostgreSQL(
         this IServiceCollection services,
+        IConfiguration configuration,
         Action<DocumentsDatabaseOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
         services.Configure(configure);
         services.TryAddSingleton<IDocumentStore, PostgreSqlDocumentStore>();
-        services.AddStellaegisDocumentsServices();
+        services.AddStellaegisDocumentsServices(configuration);
         return services;
     }
 }

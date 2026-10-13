@@ -12,5 +12,5 @@ public sealed class DocumentsOptions
     /// The blob space holding document content, within each holder's storage. Must be a valid space
     /// name for <c>BlobLocation</c> (Stellaegis.Blobs): at most 63 characters.
     /// </summary>
-    public string BlobSpace { get; set; } = "documents";
+    public string BlobSpace { get; init; } = "documents";
 }
