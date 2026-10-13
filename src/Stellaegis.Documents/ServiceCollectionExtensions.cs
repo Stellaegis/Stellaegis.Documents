@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Stellaegis.Common;
 using Stellaegis.Documents.InMemory;
 
 namespace Stellaegis.Documents;
@@ -11,42 +10,33 @@ namespace Stellaegis.Documents;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the document domain service layer (<see cref="IDocumentTemplateService"/>) and the
-    /// <see cref="SystemTemplateSeeder"/>. Requires an <see cref="ITemplateStore"/> and an
-    /// <c>IBlobStore</c> to be registered (via an InMemory/PostgreSQL store and a blob adapter).
+    /// Registers the document domain service layer (<see cref="IDocumentService"/>). Requires an
+    /// <see cref="IDocumentStore"/> and an <c>IBlobStore</c> to be registered (via an InMemory/PostgreSQL
+    /// store and a blob adapter).
     /// </summary>
     /// <remarks>Called automatically by <see cref="AddStellaegisDocumentsInMemory"/> and the PostgreSQL variant.</remarks>
-    public static IServiceCollection AddStellaegisDocumentsServices(this IServiceCollection services)
+    public static IServiceCollection AddStellaegisDocumentsServices(
+        this IServiceCollection services,
+        Action<DocumentsOptions>? configure = null)
     {
-        services.TryAddScoped<IDocumentTemplateService, DocumentTemplateService>();
+        var options = services.AddOptions<DocumentsOptions>();
+        if (configure is not null)
+            options.Configure(configure);
+
         services.TryAddScoped<IDocumentService, DocumentService>();
-
-        services.TryAddScoped<SystemTemplateSeeder>();
-        services.AddScoped<IDataSeeder, SystemTemplateSeeder>(sp => sp.GetRequiredService<SystemTemplateSeeder>());
-
         return services;
     }
 
     /// <summary>
-    /// Registers the in-memory <see cref="ITemplateStore"/> along with the document domain service layer.
+    /// Registers the in-memory <see cref="IDocumentStore"/> along with the document domain service layer.
     /// For development and testing only.
     /// </summary>
-    public static IServiceCollection AddStellaegisDocumentsInMemory(this IServiceCollection services)
+    public static IServiceCollection AddStellaegisDocumentsInMemory(
+        this IServiceCollection services,
+        Action<DocumentsOptions>? configure = null)
     {
-        services.TryAddSingleton<ITemplateStore, InMemoryTemplateStore>();
         services.TryAddSingleton<IDocumentStore, InMemoryDocumentStore>();
-        services.AddStellaegisDocumentsServices();
-        return services;
-    }
-
-    /// <summary>
-    /// Contributes a system template (<c>tenant_slug = ''</c>) to be seeded at startup by
-    /// <see cref="SystemTemplateSeeder"/>.
-    /// </summary>
-    public static IServiceCollection AddStellaegisSystemTemplate(this IServiceCollection services, SystemTemplateDefinition definition)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        services.AddSingleton(definition);
+        services.AddStellaegisDocumentsServices(configure);
         return services;
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Stellaegis.Primitives;
 
 namespace Stellaegis.Documents.InMemory;
 
@@ -20,7 +21,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
 
     public Task<IReadOnlyList<Document>> ListByTenantAsync(string tenantSlug, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tenantSlug);
+        Guard.NotWhiteSpace(tenantSlug);
 
         var result = _documents.Values
             .Where(d => d.TenantSlug == tenantSlug && d.Status == DocumentStatus.Active)
@@ -31,7 +32,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
 
     public Task CreateAsync(Document document, DocumentVersion? initialVersion, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(document);
+        Guard.NotNull(document);
 
         if (!_documents.TryAdd(document.DocumentUniqueId, document))
             throw new InvalidOperationException($"Document '{document.DocumentUniqueId:N}' already exists.");
@@ -44,7 +45,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
 
     public Task UpdateCurrentAsync(Document document, DocumentVersion? newVersion, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(document);
+        Guard.NotNull(document);
 
         _documents[document.DocumentUniqueId] = document;
         if (newVersion is not null)

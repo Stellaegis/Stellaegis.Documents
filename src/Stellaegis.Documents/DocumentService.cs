@@ -1,8 +1,11 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Stellaegis.Backplane;
 using Stellaegis.Backplane.DocumentEvents;
 using Stellaegis.Blobs;
 using Stellaegis.MultiTenant.Context;
+using Stellaegis.Primitives;
 
 namespace Stellaegis.Documents;
 
@@ -21,18 +24,22 @@ internal sealed class DocumentService(
     IDocumentStore store,
     ITenantContext tenantContext,
     IBlobStore blobStore,
+    IOptions<DocumentsOptions> options,
+    ILogger<DocumentService> logger,
     IBackplane? backplane = null) : IDocumentService
 {
-    private readonly IDocumentStore _store = store ?? throw new ArgumentNullException(nameof(store));
-    private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
-    private readonly IBlobStore _blobStore = blobStore ?? throw new ArgumentNullException(nameof(blobStore));
+    private readonly IDocumentStore _store = Guard.NotNull(store);
+    private readonly ITenantContext _tenantContext = Guard.NotNull(tenantContext);
+    private readonly IBlobStore _blobStore = Guard.NotNull(blobStore);
+    private readonly string _blobSpace = Guard.NotWhiteSpace(Guard.NotNull(options).Value.BlobSpace);
+    private readonly ILogger<DocumentService> _logger = Guard.NotNull(logger);
     private readonly IBackplane? _backplane = backplane;
 
     public async Task<Document> CreateAsync(string documentType, Stream content, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(documentType);
-        ArgumentNullException.ThrowIfNull(content);
-        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        Guard.NotWhiteSpace(documentType);
+        Guard.NotNull(content);
+        Guard.NotWhiteSpace(actor);
         var tenantSlug = CurrentTenantSlug();
 
         var bytes = await ReadAllAsync(content, cancellationToken).ConfigureAwait(false);
@@ -67,8 +74,8 @@ internal sealed class DocumentService(
 
     public async Task<Document> UpdateContentAsync(Guid documentUniqueId, Stream content, string actor, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(content);
-        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        Guard.NotNull(content);
+        Guard.NotWhiteSpace(actor);
         var tenantSlug = CurrentTenantSlug();
 
         var current = await _store.GetAsync(documentUniqueId, cancellationToken).ConfigureAwait(false);
@@ -105,14 +112,14 @@ internal sealed class DocumentService(
     public async Task<Stream> OpenContentAsync(Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
         var (tenantSlug, document) = await RequireAsync(documentUniqueId, cancellationToken).ConfigureAwait(false);
-        return await _blobStore.OpenReadAsync(new BlobLocation(tenantSlug, BlobNames.Documents, document.StoragePath), cancellationToken).ConfigureAwait(false);
+        return await OpenBlobAsync(documentUniqueId, Location(tenantSlug, document.StoragePath), cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Uri?> TryGetContentUrlAsync(Guid documentUniqueId, TimeSpan validity, CancellationToken cancellationToken = default)
     {
         var (tenantSlug, document) = await RequireAsync(documentUniqueId, cancellationToken).ConfigureAwait(false);
         return await _blobStore.TryGetDownloadUrlAsync(
-            new BlobLocation(tenantSlug, BlobNames.Documents, document.StoragePath), validity, cancellationToken).ConfigureAwait(false);
+            Location(tenantSlug, document.StoragePath), validity, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Stream> OpenVersionContentAsync(Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
@@ -120,7 +127,7 @@ internal sealed class DocumentService(
         var (tenantSlug, _) = await RequireAsync(documentUniqueId, cancellationToken).ConfigureAwait(false);
         var version = await _store.GetVersionAsync(documentUniqueId, versionNumber, cancellationToken).ConfigureAwait(false)
             ?? throw new DocumentNotFoundException(documentUniqueId);
-        return await _blobStore.OpenReadAsync(new BlobLocation(tenantSlug, BlobNames.Documents, version.StoragePath), cancellationToken).ConfigureAwait(false);
+        return await OpenBlobAsync(documentUniqueId, Location(tenantSlug, version.StoragePath), cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Document?> GetAsync(Guid documentUniqueId, CancellationToken cancellationToken = default)
@@ -141,7 +148,7 @@ internal sealed class DocumentService(
 
     public async Task TrashAsync(Guid documentUniqueId, string actor, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+        Guard.NotWhiteSpace(actor);
         var (tenantSlug, _) = await RequireAsync(documentUniqueId, cancellationToken).ConfigureAwait(false);
         await _store.SetStatusAsync(documentUniqueId, DocumentStatus.Trashed, actor, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
@@ -178,8 +185,22 @@ internal sealed class DocumentService(
         return (tenantSlug, document);
     }
 
+    private async Task<Stream> OpenBlobAsync(Guid documentUniqueId, BlobLocation location, CancellationToken cancellationToken)
+    {
+        var stream = await _blobStore.OpenReadAsync(location, cancellationToken).ConfigureAwait(false);
+        if (stream is not null)
+            return stream;
+
+        // Metadata without content is a storage inconsistency: the caller gets the same answer as for an
+        // absent document, and the log keeps what operations need to repair it.
+        _logger.LogError("Document {DocumentUniqueId} is indexed but has no content at {BlobLocation}.", documentUniqueId, location);
+        throw new DocumentNotFoundException(documentUniqueId);
+    }
+
     private Task WriteBlobAsync(string tenantSlug, string key, byte[] bytes, CancellationToken cancellationToken)
-        => _blobStore.WriteAsync(new BlobLocation(tenantSlug, BlobNames.Documents, key), new MemoryStream(bytes, writable: false), cancellationToken);
+        => _blobStore.WriteAsync(Location(tenantSlug, key), new MemoryStream(bytes, writable: false), cancellationToken);
+
+    private BlobLocation Location(string holder, string key) => new(holder, _blobSpace, key);
 
     private string CurrentTenantSlug()
     {

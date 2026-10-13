@@ -7,6 +7,9 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.10" />
+    <!-- Stellaegis -->
+    <PackageVersion Include="Stellaegis.Primitives" Version="1.0.0" />
+    <PackageVersion Include="Stellaegis.Blobs" Version="1.0.1" />
     <!-- Data access -->
     <PackageVersion Include="Dapper" Version="2.1.79" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />

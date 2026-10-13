@@ -9,9 +9,8 @@ namespace Stellaegis.Documents.PostgreSQL;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the PostgreSQL document stores (<see cref="PostgreSqlTemplateStore"/> and
-    /// <see cref="PostgreSqlDocumentStore"/>) and the document domain service layer. A blob adapter
-    /// must also be registered.
+    /// Registers the PostgreSQL document store (<see cref="PostgreSqlDocumentStore"/>) and the document
+    /// domain service layer. A blob adapter must also be registered.
     /// </summary>
     public static IServiceCollection AddStellaegisDocumentsPostgreSQL(
         this IServiceCollection services,
@@ -20,7 +19,6 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configure);
 
         services.Configure(configure);
-        services.TryAddSingleton<ITemplateStore, PostgreSqlTemplateStore>();
         services.TryAddSingleton<IDocumentStore, PostgreSqlDocumentStore>();
         services.AddStellaegisDocumentsServices();
         return services;

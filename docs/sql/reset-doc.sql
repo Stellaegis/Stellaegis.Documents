@@ -8,9 +8,6 @@
 
 BEGIN;
 
--- Documents before templates (no FK between them, but keeps a stable order
--- consistent with the other reset-*.sql scripts — children first).
 DELETE FROM doc.documents;
-DELETE FROM doc.templates;
 
 COMMIT;
