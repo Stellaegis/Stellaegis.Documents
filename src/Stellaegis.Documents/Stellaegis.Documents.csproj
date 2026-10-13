@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Stellaegis.Documents</RootNamespace>
+    <PackageId>Stellaegis.Documents</PackageId>
+    <Description>Stellaegis document domain: multi-tenant template resolution (system defaults + tenant overrides) over a mutualised schema correlated by tenant_slug, with content stored via Stellaegis.Blobs.</Description>
+    <PackageTags>stellaegis;documents;ged;templates;multi-tenant</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Stellaegis.Common\Stellaegis.Common.csproj" />
+    <ProjectReference Include="..\..\Stellaegis.MultiTenant\Stellaegis.MultiTenant.csproj" />
+    <ProjectReference Include="..\..\blobs\Stellaegis.Blobs\Stellaegis.Blobs.csproj" />
+    <ProjectReference Include="..\..\backplane\Stellaegis.Backplane.Core\Stellaegis.Backplane.Core.csproj" />
+  </ItemGroup>
+
+</Project>
