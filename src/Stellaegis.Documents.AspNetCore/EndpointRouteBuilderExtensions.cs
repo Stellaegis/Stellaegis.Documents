@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
@@ -16,8 +17,8 @@ namespace Stellaegis.Documents.AspNetCore;
 /// <remarks>
 /// <para>Endpoints, relative to the builder they are mapped on:</para>
 /// <list type="bullet">
-///   <item><c>POST documents</c> — create a document from a <c>multipart/form-data</c> request: a <c>file</c>
-///   part, a <c>documentType</c> field and an optional <c>isVersioned</c> field</item>
+///   <item><c>POST documents</c> — create a document from a <c>multipart/form-data</c> request: a
+///   <c>documentType</c> field, an optional <c>isVersioned</c> field, then a <c>file</c> part</item>
 ///   <item><c>GET documents?continuationToken=…</c> — one page of the holder's active documents</item>
 ///   <item><c>GET documents/{id}</c> — a document's metadata</item>
 ///   <item><c>PUT documents/{id}/content</c> — replace its content (same multipart form, <c>file</c> only)</item>
@@ -26,6 +27,9 @@ namespace Stellaegis.Documents.AspNetCore;
 ///   <item>a streamed content carries its SHA-256 as <c>Repr-Digest</c> (RFC 9530) and as a strong <c>ETag</c>,
 ///   and answers <c>Range</c> requests, so an interrupted download resumes; the <c>file</c> part of an upload
 ///   may carry a <c>Content-Digest</c>, and content that does not match it is refused with <c>400</c></item>
+///   <item>an upload streams from the request to the blob store, never buffered in memory nor on disk: the
+///   fields must therefore come before the <c>file</c> part, which is read last. The host's request size
+///   limit applies (30 MB by default under Kestrel): raise it on the group for larger documents</item>
 ///   <item><c>GET documents/{id}/versions</c> and <c>GET documents/{id}/versions/{n}/content</c> — its history</item>
 ///   <item><c>DELETE documents/{id}</c> — move it to the trash</item>
 /// </list>
@@ -97,21 +101,14 @@ public static class EndpointRouteBuilderExtensions
                 if (Caller(http, resolveHolder) is not { } caller)
                     return Refusal(http, resolveHolder);
 
-                var form = await ReadFormAsync(http, ct);
-                if (form is null || form.Files["file"] is not { } file)
-                    return Results.Problem("A multipart/form-data request with a 'file' part is required.", statusCode: StatusCodes.Status400BadRequest);
+                return await WithUploadAsync(http, async (fields, upload) =>
+                {
+                    if (string.IsNullOrWhiteSpace(fields.DocumentType))
+                        return BadRequest("A 'documentType' field is required, before the 'file' part.");
 
-                var documentType = form["documentType"].ToString();
-                if (string.IsNullOrWhiteSpace(documentType))
-                    return Results.Problem("A 'documentType' field is required.", statusCode: StatusCodes.Status400BadRequest);
-
-                var isVersioned = bool.TryParse(form["isVersioned"], out var versioned) && versioned;
-                if (!TryReadDigest(file, out var expectedHash))
-                    return Results.Problem("The 'Content-Digest' of the 'file' part is malformed.", statusCode: StatusCodes.Status400BadRequest);
-
-                await using var content = file.OpenReadStream();
-                var document = await documents.CreateAsync(caller.Holder, documentType, Upload(file, content, expectedHash), caller.Actor, isVersioned, ct);
-                return Results.Created($"{http.Request.PathBase}{http.Request.Path.Value?.TrimEnd('/')}/{document.DocumentUniqueId:N}", DocumentResponse.From(document));
+                    var document = await documents.CreateAsync(caller.Holder, fields.DocumentType, upload, caller.Actor, fields.IsVersioned, ct);
+                    return Results.Created($"{http.Request.PathBase}{http.Request.Path.Value?.TrimEnd('/')}/{document.DocumentUniqueId:N}", DocumentResponse.From(document));
+                }, ct);
             })
             .RequireAuthorization(writePolicy)
             .DisableAntiforgery()
@@ -155,15 +152,11 @@ public static class EndpointRouteBuilderExtensions
                 if (access.Failure is not null)
                     return access.Failure;
 
-                var form = await ReadFormAsync(http, ct);
-                if (form is null || form.Files["file"] is not { } file)
-                    return Results.Problem("A multipart/form-data request with a 'file' part is required.", statusCode: StatusCodes.Status400BadRequest);
-                if (!TryReadDigest(file, out var expectedHash))
-                    return Results.Problem("The 'Content-Digest' of the 'file' part is malformed.", statusCode: StatusCodes.Status400BadRequest);
-
-                await using var content = file.OpenReadStream();
-                var document = await documents.UpdateContentAsync(access.Holder, id, Upload(file, content, expectedHash), access.Actor, ct);
-                return Results.Ok(DocumentResponse.From(document));
+                return await WithUploadAsync(http, async (_, upload) =>
+                {
+                    var document = await documents.UpdateContentAsync(access.Holder, id, upload, access.Actor, ct);
+                    return Results.Ok(DocumentResponse.From(document));
+                }, ct);
             })
             .RequireAuthorization(writePolicy)
             .DisableAntiforgery()
@@ -298,31 +291,84 @@ public static class EndpointRouteBuilderExtensions
 
     private static readonly AllowAllDocumentAccessPolicy AllowAllPolicy = new();
 
-    private static async Task<IFormCollection?> ReadFormAsync(HttpContext http, CancellationToken ct)
-        => http.Request.HasFormContentType ? await http.Request.ReadFormAsync(ct) : null;
+    private const int MaxFieldLength = 1024;
 
-    private static DocumentUpload Upload(IFormFile file, Stream content, string? expectedHash) => new()
+    private sealed record UploadFields(string? DocumentType, bool IsVersioned);
+
+    // Reads the multipart request as it arrives: the fields, then the 'file' part, whose body is handed to
+    // the service as it streams in. Nothing of the content is buffered, in memory or on disk.
+    private static async Task<IResult> WithUploadAsync(
+        HttpContext http, Func<UploadFields, DocumentUpload, Task<IResult>> handle, CancellationToken ct)
     {
-        Content = content,
-        FileName = Path.GetFileName(file.FileName),
-        ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
-        ExpectedContentHash = expectedHash,
-    };
+        if (!MediaTypeHeaderValue.TryParse(http.Request.ContentType, out var mediaType)
+            || !mediaType.MediaType.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)
+            || HeaderUtilities.RemoveQuotes(mediaType.Boundary).Value is not { Length: > 0 } boundary)
+            return BadRequest("A multipart/form-data request with a 'file' part is required.");
 
-    // Absent: nothing to check. Present without a readable SHA-256 entry: refused, rather than stored unchecked.
-    private static bool TryReadDigest(IFormFile file, out string? expectedHash)
-    {
-        expectedHash = null;
-        var header = file.Headers["Content-Digest"].ToString();
-        if (string.IsNullOrWhiteSpace(header))
-            return true;
+        var reader = new MultipartReader(boundary, http.Request.Body);
+        string? documentType = null;
+        var isVersioned = false;
 
-        if (!ContentDigest.TryReadSha256(header, out var hash))
-            return false;
+        while (await reader.ReadNextSectionAsync(ct) is { } section)
+        {
+            if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var disposition))
+                continue;
 
-        expectedHash = hash;
-        return true;
+            var name = HeaderUtilities.RemoveQuotes(disposition.Name).Value;
+            if (disposition.IsFormDisposition())
+            {
+                var value = await ReadFieldAsync(section, ct);
+                if (value is null)
+                    return BadRequest($"The '{name}' field is longer than {MaxFieldLength} characters.");
+
+                if (name == "documentType")
+                    documentType = value;
+                else if (name == "isVersioned")
+                    isVersioned = bool.TryParse(value, out var versioned) && versioned;
+                continue;
+            }
+
+            if (!disposition.IsFileDisposition() || name != "file")
+                continue;
+
+            // Absent: nothing to check. Present without a readable SHA-256 entry: refused, rather than stored
+            // unchecked.
+            string? expectedHash = null;
+            if (section.Headers?.TryGetValue("Content-Digest", out var digest) == true)
+            {
+                if (!ContentDigest.TryReadSha256(digest.ToString(), out var hash))
+                    return BadRequest("The 'Content-Digest' of the 'file' part is malformed.");
+                expectedHash = hash;
+            }
+
+            var fileName = disposition.FileNameStar.HasValue ? disposition.FileNameStar.Value : HeaderUtilities.RemoveQuotes(disposition.FileName).Value;
+            var upload = new DocumentUpload
+            {
+                Content = section.Body,
+                FileName = Path.GetFileName(fileName ?? string.Empty),
+                ContentType = string.IsNullOrWhiteSpace(section.ContentType) ? "application/octet-stream" : section.ContentType,
+                ExpectedContentHash = expectedHash,
+            };
+            return await handle(new UploadFields(documentType, isVersioned), upload);
+        }
+
+        return BadRequest("A 'file' part is required.");
     }
+
+    // A field is a short value: reading stops past MaxFieldLength rather than buffer whatever is sent.
+    private static async Task<string?> ReadFieldAsync(MultipartSection section, CancellationToken ct)
+    {
+        using var reader = new StreamReader(section.Body);
+        var buffer = new char[MaxFieldLength + 1];
+        var length = 0;
+        int read;
+        while (length < buffer.Length && (read = await reader.ReadAsync(buffer.AsMemory(length), ct)) > 0)
+            length += read;
+
+        return length > MaxFieldLength ? null : new string(buffer, 0, length);
+    }
+
+    private static IResult BadRequest(string detail) => Results.Problem(detail, statusCode: StatusCodes.Status400BadRequest);
 
     // Repr-Digest describes the whole content, so it stays true on a partial (Range) answer, where a
     // Content-Digest would describe only the bytes sent.

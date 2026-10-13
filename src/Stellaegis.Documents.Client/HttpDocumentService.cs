@@ -43,9 +43,13 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         Guard.NotWhiteSpace(documentType);
         Guard.NotNull(upload);
 
-        using var form = Form(upload);
-        form.Add(new StringContent(documentType), "documentType");
-        form.Add(new StringContent(isVersioned ? "true" : "false"), "isVersioned");
+        // The server reads the fields before the file part, which streams last.
+        using var form = new MultipartFormDataContent
+        {
+            { new StringContent(documentType), "documentType" },
+            { new StringContent(isVersioned ? "true" : "false"), "isVersioned" },
+        };
+        AddFile(form, upload);
 
         using var response = await _http.PostAsync(Url(holder, string.Empty), form, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, null, cancellationToken).ConfigureAwait(false);
@@ -57,7 +61,8 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         Guard.NotNull(holder);
         Guard.NotNull(upload);
 
-        using var form = Form(upload);
+        using var form = new MultipartFormDataContent();
+        AddFile(form, upload);
         using var response = await _http.PutAsync(Url(holder, $"/{documentUniqueId:N}/content"), form, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, documentUniqueId, cancellationToken).ConfigureAwait(false);
         return ToDocument(holder, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
@@ -159,7 +164,7 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
 
     private string Url(string holder, string rest) => $"{_holderPath.For(holder)}documents{rest}";
 
-    private static MultipartFormDataContent Form(DocumentUpload upload)
+    private static void AddFile(MultipartFormDataContent form, DocumentUpload upload)
     {
         var content = Guard.NotNull(upload.Content);
         var hash = upload.ExpectedContentHash ?? HashIfSeekable(content);
@@ -169,7 +174,7 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         if (hash is not null)
             file.Headers.Add("Content-Digest", ContentDigest.Format(hash));
 
-        return new MultipartFormDataContent { { file, "file", upload.FileName } };
+        form.Add(file, "file", upload.FileName);
     }
 
     // A forward-only stream cannot be hashed before it is sent without being held in memory: it goes
