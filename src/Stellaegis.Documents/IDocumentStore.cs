@@ -16,6 +16,9 @@ public interface IDocumentStore
     /// <summary>Lists a holder's active documents.</summary>
     Task<IReadOnlyList<Document>> ListAsync(string holder, CancellationToken cancellationToken = default);
 
+    /// <summary>Lists all of a holder's documents, whatever their status.</summary>
+    Task<IReadOnlyList<Document>> ListAllAsync(string holder, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Creates a document and, when supplied, its first version — atomically (one transaction in the
     /// persistent store). The document carries its holder.
@@ -40,4 +43,10 @@ public interface IDocumentStore
 
     /// <summary>Gets a specific version of a holder's document, or <see langword="null"/>.</summary>
     Task<DocumentVersion?> GetVersionAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes a holder's document and its versions for good — atomically. No-op when the holder has no
+    /// such document.
+    /// </summary>
+    Task DeleteAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default);
 }

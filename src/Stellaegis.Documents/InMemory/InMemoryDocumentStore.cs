@@ -27,6 +27,14 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
 
+    public Task<IReadOnlyList<Document>> ListAllAsync(string holder, CancellationToken cancellationToken = default)
+    {
+        Guard.NotNull(holder);
+
+        var result = _documents.Values.Where(d => d.Holder == holder).ToList();
+        return Task.FromResult<IReadOnlyList<Document>>(result);
+    }
+
     public Task CreateAsync(Document document, DocumentVersion? initialVersion, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(document);
@@ -86,6 +94,18 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
             ? found
             : null;
         return Task.FromResult(version);
+    }
+
+    public Task DeleteAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    {
+        if (Find(holder, documentUniqueId) is null)
+            return Task.CompletedTask;
+
+        foreach (var key in _versions.Keys.Where(k => k.Id == documentUniqueId).ToList())
+            _versions.TryRemove(key, out _);
+        _documents.TryRemove(documentUniqueId, out _);
+
+        return Task.CompletedTask;
     }
 
     private Document? Find(string holder, Guid documentUniqueId)

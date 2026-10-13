@@ -152,6 +152,27 @@ internal sealed class DocumentService(
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<int> PurgeHolderAsync(string holder, CancellationToken cancellationToken = default)
+    {
+        Guard.NotWhiteSpace(holder);
+
+        var documents = await _store.ListAllAsync(holder, cancellationToken).ConfigureAwait(false);
+        foreach (var document in documents)
+        {
+            // Content first: a purge cut between the two leaves metadata that the next call finds and
+            // completes, never content that nothing points to any more.
+            var versions = await _store.GetVersionsAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
+            var keys = versions.Select(v => v.StoragePath).Append(document.StoragePath).Distinct(StringComparer.Ordinal);
+            foreach (var key in keys)
+                await _blobStore.DeleteAsync(Location(holder, key), cancellationToken).ConfigureAwait(false);
+
+            await _store.DeleteAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation("Purged {DocumentCount} documents of holder {Holder}.", documents.Count, holder);
+        return documents.Count;
+    }
+
     private Task PublishIndexedAsync(Document document, DateTimeOffset occurredAt, CancellationToken cancellationToken)
         => _events.PublishAsync(
             new DocumentIndexedEvent

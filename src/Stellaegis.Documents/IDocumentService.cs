@@ -56,4 +56,17 @@ public interface IDocumentService
     /// <summary>Marks a document as trashed.</summary>
     /// <exception cref="DocumentNotFoundException">No document with that id for the holder.</exception>
     Task TrashAsync(string holder, Guid documentUniqueId, string actor, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes every document of <paramref name="holder"/> for good, whatever its status: content of every
+    /// version, then metadata. Irreversible.
+    /// </summary>
+    /// <remarks>
+    /// Confirmations and any retention delay belong to whoever manages the holder's life, which calls this
+    /// once they are through. The call can be replayed: an interrupted purge leaves the metadata of the
+    /// documents it did not finish, and the next call completes them.
+    /// </remarks>
+    /// <returns>The number of documents deleted.</returns>
+    /// <exception cref="ArgumentException"><paramref name="holder"/> is empty: the platform's documents are never purged this way.</exception>
+    Task<int> PurgeHolderAsync(string holder, CancellationToken cancellationToken = default);
 }
