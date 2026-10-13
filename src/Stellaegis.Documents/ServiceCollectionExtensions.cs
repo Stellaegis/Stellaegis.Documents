@@ -14,7 +14,8 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers the document domain service layer (<see cref="IDocumentService"/>), configured from
     /// <paramref name="sectionName"/>. Requires an <see cref="IDocumentStore"/> and an <c>IBlobStore</c>
-    /// to be registered (via an InMemory/PostgreSQL store and a blob adapter).
+    /// to be registered (via an InMemory/PostgreSQL store and a blob adapter). Events go to the registered
+    /// <see cref="IEventPublisher"/>, or nowhere (<see cref="NullEventPublisher"/>) when the host registers none.
     /// </summary>
     /// <remarks>Called automatically by <see cref="AddStellaegisDocumentsInMemory"/> and the PostgreSQL variant.</remarks>
     public static IServiceCollection AddStellaegisDocumentsServices(
@@ -26,6 +27,7 @@ public static class ServiceCollectionExtensions
         Guard.NotWhiteSpace(sectionName);
 
         services.Configure<DocumentsOptions>(configuration.GetSection(sectionName));
+        services.TryAddSingleton<IEventPublisher>(NullEventPublisher.Instance);
         services.TryAddScoped<IDocumentService, DocumentService>();
         return services;
     }

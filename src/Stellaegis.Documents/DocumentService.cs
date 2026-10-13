@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Stellaegis.Backplane;
-using Stellaegis.Backplane.DocumentEvents;
 using Stellaegis.Blobs;
 using Stellaegis.Primitives;
 
@@ -14,23 +12,22 @@ namespace Stellaegis.Documents;
 /// cleanable orphan blob rather than a dangling pointer).
 /// </summary>
 /// <remarks>
-/// When an <see cref="IBackplane"/> is available it publishes <see cref="DocumentIndexedEvent"/> on
-/// create/content-change and <see cref="DocumentTrashedEvent"/> on trash, so consumers can maintain
-/// their own search projection. The dependency is optional: in-memory/dev and unit-test scenarios run
-/// without a backplane and simply skip publication.
+/// Publishes <see cref="DocumentIndexedEvent"/> on create/content-change and <see cref="DocumentTrashedEvent"/>
+/// on trash through <see cref="IEventPublisher"/>, after the metadata is stored, so consumers can maintain
+/// their own search projection. Without a host transport the publisher is <see cref="NullEventPublisher"/>.
 /// </remarks>
 internal sealed class DocumentService(
     IDocumentStore store,
     IBlobStore blobStore,
     IOptions<DocumentsOptions> options,
-    ILogger<DocumentService> logger,
-    IBackplane? backplane = null) : IDocumentService
+    IEventPublisher events,
+    ILogger<DocumentService> logger) : IDocumentService
 {
     private readonly IDocumentStore _store = Guard.NotNull(store);
     private readonly IBlobStore _blobStore = Guard.NotNull(blobStore);
     private readonly string _blobSpace = Guard.NotWhiteSpace(Guard.NotNull(options).Value.BlobSpace);
     private readonly ILogger<DocumentService> _logger = Guard.NotNull(logger);
-    private readonly IBackplane? _backplane = backplane;
+    private readonly IEventPublisher _events = Guard.NotNull(events);
 
     public async Task<Document> CreateAsync(string holder, string documentType, Stream content, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default)
     {
@@ -65,7 +62,7 @@ internal sealed class DocumentService(
             : null;
 
         await _store.CreateAsync(document, initialVersion, cancellationToken).ConfigureAwait(false);
-        await PublishIndexedAsync(document, cancellationToken).ConfigureAwait(false);
+        await PublishIndexedAsync(document, now, cancellationToken).ConfigureAwait(false);
         return document;
     }
 
@@ -94,7 +91,7 @@ internal sealed class DocumentService(
             var updated = current with { StoragePath = key, ContentHash = hash, ModifiedAt = now, ModifiedBy = actor };
             var version = new DocumentVersion { DocumentUniqueId = documentUniqueId, VersionNumber = next, StoragePath = key, CreatedAt = now, CreatedBy = actor };
             await _store.UpdateCurrentAsync(updated, version, cancellationToken).ConfigureAwait(false);
-            await PublishIndexedAsync(updated, cancellationToken).ConfigureAwait(false);
+            await PublishIndexedAsync(updated, now, cancellationToken).ConfigureAwait(false);
             return updated;
         }
 
@@ -102,7 +99,7 @@ internal sealed class DocumentService(
         await WriteBlobAsync(holder, current.StoragePath, bytes, cancellationToken).ConfigureAwait(false);
         var overwritten = current with { ContentHash = hash, ModifiedAt = now, ModifiedBy = actor };
         await _store.UpdateCurrentAsync(overwritten, null, cancellationToken).ConfigureAwait(false);
-        await PublishIndexedAsync(overwritten, cancellationToken).ConfigureAwait(false);
+        await PublishIndexedAsync(overwritten, now, cancellationToken).ConfigureAwait(false);
         return overwritten;
     }
 
@@ -144,31 +141,27 @@ internal sealed class DocumentService(
     {
         Guard.NotWhiteSpace(actor);
         await RequireAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
-        await _store.SetStatusAsync(holder, documentUniqueId, DocumentStatus.Trashed, actor, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
 
-        if (_backplane is not null)
-            await _backplane.PublishAsync(
-                new DocumentTrashedEvent { TenantSlug = holder, DocumentId = documentUniqueId.ToString("N") },
-                cancellationToken).ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        await _store.SetStatusAsync(holder, documentUniqueId, DocumentStatus.Trashed, actor, now, cancellationToken).ConfigureAwait(false);
+        await _events.PublishAsync(
+            new DocumentTrashedEvent { OccurredAt = now, Holder = holder, DocumentUniqueId = documentUniqueId },
+            cancellationToken).ConfigureAwait(false);
     }
 
-    private Task PublishIndexedAsync(Document document, CancellationToken cancellationToken)
-    {
-        if (_backplane is null)
-            return Task.CompletedTask;
-
-        return _backplane.PublishAsync(
+    private Task PublishIndexedAsync(Document document, DateTimeOffset occurredAt, CancellationToken cancellationToken)
+        => _events.PublishAsync(
             new DocumentIndexedEvent
             {
-                TenantSlug = document.Holder,
-                DocumentId = document.DocumentUniqueId.ToString("N"),
+                OccurredAt = occurredAt,
+                Holder = document.Holder,
+                DocumentUniqueId = document.DocumentUniqueId,
                 DocumentType = document.DocumentType,
                 ContentHash = document.ContentHash,
-                BusinessObjectLink = document.BusinessObjectLink?.ToString("N"),
+                BusinessObjectLink = document.BusinessObjectLink,
                 IsVersioned = document.IsVersioned,
             },
             cancellationToken);
-    }
 
     private async Task<Document> RequireAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken)
     {

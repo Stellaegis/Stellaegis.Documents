@@ -16,8 +16,4 @@
     <PackageReference Include="Stellaegis.Blobs" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\backplane\Stellaegis.Backplane.Core\Stellaegis.Backplane.Core.csproj" />
-  </ItemGroup>
-
 </Project>
