@@ -20,12 +20,12 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         "pgp_sym_decrypt({0}.file_name, case {0}.key_slot when 1 then @Passphrase1 else @Passphrase2 end) as file_name";
 
     private static readonly string DocumentColumns =
-        "d.document_unique_id, d.holder, d.document_type, d.storage_path, d.content_hash, " +
+        "d.document_unique_id, d.holder, d.document_type, d.version_number, d.content_hash, " +
         string.Format(DecryptFileName, "d") + ", d.content_type, d.content_length, " +
         "d.status::text as status, d.is_versioned, d.created_at, d.created_by, d.modified_at, d.modified_by";
 
     private static readonly string VersionColumns =
-        "v.document_unique_id, v.version_number, v.storage_path, " +
+        "v.document_unique_id, v.version_number, " +
         string.Format(DecryptFileName, "v") + ", v.content_type, v.content_length, v.created_at, v.created_by";
 
     private readonly string _connectionString;
@@ -112,10 +112,10 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         await connection.ExecuteAsync(new CommandDefinition(
             """
             insert into doc.documents
-              (document_unique_id, holder, document_type, storage_path, content_hash, file_name, content_type,
+              (document_unique_id, holder, document_type, version_number, content_hash, file_name, content_type,
                content_length, key_slot, status, is_versioned, created_at, created_by, modified_at, modified_by)
             values
-              (@DocumentUniqueId, @Holder, @DocumentType, @StoragePath, @ContentHash,
+              (@DocumentUniqueId, @Holder, @DocumentType, @VersionNumber, @ContentHash,
                pgp_sym_encrypt(@FileName, @ActivePassphrase), @ContentType,
                @ContentLength, @KeySlot, @Status::doc.document_status, @IsVersioned, @CreatedAt, @CreatedBy, @ModifiedAt, @ModifiedBy)
             """,
@@ -124,7 +124,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
                 document.DocumentUniqueId,
                 document.Holder,
                 document.DocumentType,
-                document.StoragePath,
+                document.VersionNumber,
                 document.ContentHash,
                 document.FileName,
                 ActivePassphrase = _activePassphrase,
@@ -158,7 +158,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         var moved = await connection.ExecuteAsync(new CommandDefinition(
             """
             update doc.documents
-            set storage_path = @StoragePath, content_hash = @ContentHash,
+            set version_number = @VersionNumber, content_hash = @ContentHash,
                 file_name = pgp_sym_encrypt(@FileName, @ActivePassphrase), content_type = @ContentType,
                 content_length = @ContentLength, key_slot = @KeySlot,
                 modified_at = @ModifiedAt, modified_by = @ModifiedBy
@@ -166,7 +166,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             """,
             new
             {
-                document.StoragePath,
+                document.VersionNumber,
                 document.ContentHash,
                 document.FileName,
                 ActivePassphrase = _activePassphrase,
@@ -202,21 +202,6 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             where holder = @holder and document_unique_id = @documentUniqueId
             """,
             new { holder, documentUniqueId, status = StatusText(status), modifiedBy, modifiedAt },
-            cancellationToken: cancellationToken)).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> GetMaxVersionNumberAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await connection.ExecuteScalarAsync<int>(new CommandDefinition(
-            """
-            select coalesce(max(v.version_number), 0)
-            from doc.document_versions v
-            join doc.documents d on d.document_unique_id = v.document_unique_id
-            where d.holder = @holder and v.document_unique_id = @documentUniqueId
-            """,
-            new { holder, documentUniqueId },
             cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
@@ -269,17 +254,16 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         => connection.ExecuteAsync(new CommandDefinition(
             """
             insert into doc.document_versions
-              (document_unique_id, version_number, storage_path, file_name, content_type, content_length, key_slot,
+              (document_unique_id, version_number, file_name, content_type, content_length, key_slot,
                created_at, created_by)
             values
-              (@DocumentUniqueId, @VersionNumber, @StoragePath, pgp_sym_encrypt(@FileName, @ActivePassphrase),
+              (@DocumentUniqueId, @VersionNumber, pgp_sym_encrypt(@FileName, @ActivePassphrase),
                @ContentType, @ContentLength, @KeySlot, @CreatedAt, @CreatedBy)
             """,
             new
             {
                 version.DocumentUniqueId,
                 version.VersionNumber,
-                version.StoragePath,
                 version.FileName,
                 ActivePassphrase = _activePassphrase,
                 version.ContentType,
@@ -325,7 +309,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         public Guid DocumentUniqueId { get; set; }
         public string Holder { get; set; } = string.Empty;
         public string DocumentType { get; set; } = string.Empty;
-        public string StoragePath { get; set; } = string.Empty;
+        public int VersionNumber { get; set; }
         public string ContentHash { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
         public string ContentType { get; set; } = string.Empty;
@@ -342,7 +326,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             DocumentUniqueId = DocumentUniqueId,
             Holder = Holder,
             DocumentType = DocumentType,
-            StoragePath = StoragePath,
+            VersionNumber = VersionNumber,
             ContentHash = ContentHash,
             FileName = FileName,
             ContentType = ContentType,
@@ -360,7 +344,6 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
     {
         public Guid DocumentUniqueId { get; set; }
         public int VersionNumber { get; set; }
-        public string StoragePath { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
         public string ContentType { get; set; } = string.Empty;
         public long ContentLength { get; set; }
@@ -371,7 +354,6 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         {
             DocumentUniqueId = DocumentUniqueId,
             VersionNumber = VersionNumber,
-            StoragePath = StoragePath,
             FileName = FileName,
             ContentType = ContentType,
             ContentLength = ContentLength,

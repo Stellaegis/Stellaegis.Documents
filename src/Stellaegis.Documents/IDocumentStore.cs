@@ -29,7 +29,7 @@ public interface IDocumentStore
     Task CreateAsync(Document document, DocumentVersion? initialVersion, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Moves a document's current pointer (<c>storage_path</c>/<c>content_hash</c>) and, when
+    /// Moves a document to its new current content (version number, hash, file metadata) and, when
     /// <paramref name="newVersion"/> is supplied, appends that revision — atomically (the version row
     /// and the pointer move together). Only the document of <paramref name="document"/>'s holder is moved.
     /// </summary>
@@ -37,9 +37,6 @@ public interface IDocumentStore
 
     /// <summary>Sets the lifecycle status (e.g. trashing) of a holder's document.</summary>
     Task SetStatusAsync(string holder, Guid documentUniqueId, DocumentStatus status, string modifiedBy, DateTimeOffset modifiedAt, CancellationToken cancellationToken = default);
-
-    /// <summary>Returns the highest version number of a holder's document, or 0 if it has none.</summary>
-    Task<int> GetMaxVersionNumberAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default);
 
     /// <summary>Lists the versions of a holder's document, ordered by version number.</summary>
     Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default);

@@ -2,9 +2,9 @@ namespace Stellaegis.Documents;
 
 /// <summary>
 /// Index entry: the existence and identity of a document — never its content (which lives in the
-/// blob store) nor its business semantics. <see cref="StoragePath"/>, <see cref="ContentHash"/> and the
-/// file metadata always describe the CURRENT version (denormalised pointer — one GUID, one read, the document); the full
-/// history lives in <see cref="DocumentVersion"/>.
+/// blob store) nor its business semantics. <see cref="VersionNumber"/>, <see cref="ContentHash"/> and the
+/// file metadata always describe the current content (one GUID, one read, the document); the history of
+/// a versioned document lives in <see cref="DocumentVersion"/>.
 /// </summary>
 public sealed record Document
 {
@@ -17,8 +17,11 @@ public sealed record Document
     /// <summary>Application-defined document type code.</summary>
     public required string DocumentType { get; init; }
 
-    /// <summary>Logical blob key of the current content, within the holder's document blob space.</summary>
-    public required string StoragePath { get; init; }
+    /// <summary>
+    /// The version number of the current content, from 1. A document that is not versioned stays at 1,
+    /// its content replaced in place.
+    /// </summary>
+    public int VersionNumber { get; init; } = 1;
 
     /// <summary>SHA-256 (hex, lowercase) of the current content.</summary>
     public required string ContentHash { get; init; }

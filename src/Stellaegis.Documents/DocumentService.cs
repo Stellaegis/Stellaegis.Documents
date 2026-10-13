@@ -14,6 +14,11 @@ namespace Stellaegis.Documents;
 /// cleanable orphan blob rather than a dangling pointer).
 /// </summary>
 /// <remarks>
+/// Content is stored flat, one blob per document version, under a key derived from the document's
+/// identity alone: <c>{id:N}-{version}</c>. No key is stored, so nothing about the storage layout reaches
+/// the document, the store or the database.
+/// </remarks>
+/// <remarks>
 /// Publishes <see cref="DocumentIndexedEvent"/> on create/content-change and <see cref="DocumentTrashedEvent"/>
 /// on trash through <see cref="IEventPublisher"/>, after the metadata is stored, so consumers can maintain
 /// their own search projection. Without a host transport the publisher is <see cref="NullEventPublisher"/>.
@@ -45,9 +50,8 @@ internal sealed class DocumentService(
         var bytes = await ReadAllAsync(upload.Content, cancellationToken).ConfigureAwait(false);
         var hash = HashHex(bytes);
         var id = Guid.NewGuid();
-        var key = isVersioned ? $"{id:N}/v1" : $"{id:N}";
 
-        await WriteBlobAsync(holder, key, bytes, cancellationToken).ConfigureAwait(false);
+        await WriteBlobAsync(holder, id, 1, bytes, cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
         var document = new Document
@@ -55,7 +59,7 @@ internal sealed class DocumentService(
             DocumentUniqueId = id,
             Holder = holder,
             DocumentType = documentType,
-            StoragePath = key,
+            VersionNumber = 1,
             ContentHash = hash,
             FileName = upload.FileName,
             ContentType = upload.ContentType,
@@ -66,7 +70,7 @@ internal sealed class DocumentService(
             CreatedBy = actor,
         };
         var initialVersion = isVersioned
-            ? NewVersion(id, 1, key, upload, bytes.LongLength, now, actor)
+            ? NewVersion(id, 1, upload, bytes.LongLength, now, actor)
             : null;
 
         await _store.CreateAsync(document, initialVersion, cancellationToken).ConfigureAwait(false);
@@ -92,19 +96,20 @@ internal sealed class DocumentService(
         var now = DateTimeOffset.UtcNow;
         if (current.IsVersioned)
         {
-            var next = await _store.GetMaxVersionNumberAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false) + 1;
-            var key = $"{documentUniqueId:N}/v{next}";
-            await WriteBlobAsync(holder, key, bytes, cancellationToken).ConfigureAwait(false);
+            // Known limit: two concurrent updates compute the same number. The store refuses the second
+            // revision, but its content has already replaced the first one's under the shared key.
+            var next = current.VersionNumber + 1;
+            await WriteBlobAsync(holder, documentUniqueId, next, bytes, cancellationToken).ConfigureAwait(false);
 
-            var updated = current with { StoragePath = key, ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
-            var version = NewVersion(documentUniqueId, next, key, upload, bytes.LongLength, now, actor);
+            var updated = current with { VersionNumber = next, ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
+            var version = NewVersion(documentUniqueId, next, upload, bytes.LongLength, now, actor);
             await _store.UpdateCurrentAsync(updated, version, cancellationToken).ConfigureAwait(false);
             await PublishIndexedAsync(updated, now, cancellationToken).ConfigureAwait(false);
             return updated;
         }
 
-        // Non-versioned: overwrite in place at the stable key.
-        await WriteBlobAsync(holder, current.StoragePath, bytes, cancellationToken).ConfigureAwait(false);
+        // Not versioned: the content is replaced in place, under the same version number.
+        await WriteBlobAsync(holder, documentUniqueId, current.VersionNumber, bytes, cancellationToken).ConfigureAwait(false);
         var overwritten = current with { ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
         await _store.UpdateCurrentAsync(overwritten, null, cancellationToken).ConfigureAwait(false);
         await PublishIndexedAsync(overwritten, now, cancellationToken).ConfigureAwait(false);
@@ -114,23 +119,23 @@ internal sealed class DocumentService(
     public async Task<Stream> OpenContentAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
         var document = await RequireAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
-        return await OpenBlobAsync(documentUniqueId, Location(holder, document.StoragePath), cancellationToken).ConfigureAwait(false);
+        return await OpenBlobAsync(documentUniqueId, Location(holder, documentUniqueId, document.VersionNumber), cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Uri?> TryGetContentUrlAsync(string holder, Guid documentUniqueId, TimeSpan validity, CancellationToken cancellationToken = default)
     {
         var document = await RequireAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
         return await _blobStore.TryGetDownloadUrlAsync(
-            Location(holder, document.StoragePath), validity, cancellationToken).ConfigureAwait(false);
+            Location(holder, documentUniqueId, document.VersionNumber), validity, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Stream> OpenVersionContentAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(holder);
 
-        var version = await _store.GetVersionAsync(holder, documentUniqueId, versionNumber, cancellationToken).ConfigureAwait(false)
+        _ = await _store.GetVersionAsync(holder, documentUniqueId, versionNumber, cancellationToken).ConfigureAwait(false)
             ?? throw new DocumentNotFoundException(documentUniqueId);
-        return await OpenBlobAsync(documentUniqueId, Location(holder, version.StoragePath), cancellationToken).ConfigureAwait(false);
+        return await OpenBlobAsync(documentUniqueId, Location(holder, documentUniqueId, versionNumber), cancellationToken).ConfigureAwait(false);
     }
 
     public Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
@@ -187,10 +192,8 @@ internal sealed class DocumentService(
 
                 // Content first: a purge cut between the two leaves metadata that the next call finds and
                 // completes, never content that nothing points to any more.
-                var versions = await _store.GetVersionsAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
-                var keys = versions.Select(v => v.StoragePath).Append(document.StoragePath).Distinct(StringComparer.Ordinal);
-                foreach (var key in keys)
-                    await _blobStore.DeleteAsync(Location(holder, key), cancellationToken).ConfigureAwait(false);
+                for (var version = 1; version <= document.VersionNumber; version++)
+                    await _blobStore.DeleteAsync(Location(holder, document.DocumentUniqueId, version), cancellationToken).ConfigureAwait(false);
 
                 await _store.DeleteAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
             }
@@ -233,10 +236,11 @@ internal sealed class DocumentService(
         throw new DocumentNotFoundException(documentUniqueId);
     }
 
-    private Task WriteBlobAsync(string holder, string key, byte[] bytes, CancellationToken cancellationToken)
-        => _blobStore.WriteAsync(Location(holder, key), new MemoryStream(bytes, writable: false), cancellationToken);
+    private Task WriteBlobAsync(string holder, Guid documentUniqueId, int versionNumber, byte[] bytes, CancellationToken cancellationToken)
+        => _blobStore.WriteAsync(Location(holder, documentUniqueId, versionNumber), new MemoryStream(bytes, writable: false), cancellationToken);
 
-    private BlobLocation Location(string holder, string key) => new(holder, _blobSpace, key);
+    private BlobLocation Location(string holder, Guid documentUniqueId, int versionNumber)
+        => new(holder, _blobSpace, $"{documentUniqueId:N}-{versionNumber}");
 
     // A token only positions a list the store already scopes to the holder: altering it moves the page,
     // it never reaches another holder's documents.
@@ -284,12 +288,11 @@ internal sealed class DocumentService(
             $"A media type has at most {DocumentUpload.MaxContentTypeLength} characters.");
     }
 
-    private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, string key, DocumentUpload upload, long contentLength, DateTimeOffset now, string actor)
+    private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, DocumentUpload upload, long contentLength, DateTimeOffset now, string actor)
         => new()
         {
             DocumentUniqueId = documentUniqueId,
             VersionNumber = versionNumber,
-            StoragePath = key,
             FileName = upload.FileName,
             ContentType = upload.ContentType,
             ContentLength = contentLength,

@@ -3,11 +3,12 @@ using System.Text.Json.Serialization;
 namespace Stellaegis.Documents;
 
 /// <summary>
-/// A document as the HTTP API returns it: its index metadata, never its storage key nor its holder,
-/// which the caller already addresses.
+/// A document as the HTTP API returns it: its index metadata, never its holder, which the caller
+/// already addresses.
 /// </summary>
 /// <param name="DocumentUniqueId">Stable public identifier.</param>
 /// <param name="DocumentType">Document type code declared at creation.</param>
+/// <param name="VersionNumber">Version number of the current content, from 1.</param>
 /// <param name="FileName">File name of the current content.</param>
 /// <param name="ContentType">Media type of the current content.</param>
 /// <param name="ContentLength">Length of the current content, in bytes.</param>
@@ -21,6 +22,7 @@ namespace Stellaegis.Documents;
 public sealed record DocumentResponse(
     Guid DocumentUniqueId,
     string DocumentType,
+    int VersionNumber,
     string FileName,
     string ContentType,
     long ContentLength,
@@ -36,6 +38,7 @@ public sealed record DocumentResponse(
     public static DocumentResponse From(Document document) => new(
         document.DocumentUniqueId,
         document.DocumentType,
+        document.VersionNumber,
         document.FileName,
         document.ContentType,
         document.ContentLength,

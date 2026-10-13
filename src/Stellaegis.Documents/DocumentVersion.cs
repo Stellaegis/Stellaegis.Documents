@@ -3,7 +3,7 @@ namespace Stellaegis.Documents;
 /// <summary>
 /// A stored revision of a versioned document. Double key (<see cref="DocumentUniqueId"/> +
 /// <see cref="VersionNumber"/>): the document keeps its stable public identity, only the revision
-/// changes. Carries its own blob key, file metadata and audit — no content hash (change detection compares the
+/// changes. Carries its own file metadata and audit — no content hash (change detection compares the
 /// incoming content against the current pointer only) and no free-text note (revision semantics
 /// belong to the consumer's own store, not to this module).
 /// </summary>
@@ -14,9 +14,6 @@ public sealed record DocumentVersion
 
     /// <summary>Revision number (1-based, increasing).</summary>
     public int VersionNumber { get; init; }
-
-    /// <summary>Logical blob key of this revision's content (never overwritten in place).</summary>
-    public required string StoragePath { get; init; }
 
     /// <summary>The file name the uploader gave the revision's content. Free text, never part of a storage key.</summary>
     public required string FileName { get; init; }

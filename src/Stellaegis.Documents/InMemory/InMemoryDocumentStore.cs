@@ -73,15 +73,6 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.CompletedTask;
     }
 
-    public Task<int> GetMaxVersionNumberAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
-    {
-        var max = Versions(holder, documentUniqueId)
-            .Select(v => v.VersionNumber)
-            .DefaultIfEmpty(0)
-            .Max();
-        return Task.FromResult(max);
-    }
-
     public Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
         var result = Versions(holder, documentUniqueId)
