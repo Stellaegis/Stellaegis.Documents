@@ -13,18 +13,15 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     private readonly ConcurrentDictionary<Guid, Document> _documents = new();
     private readonly ConcurrentDictionary<(Guid Id, int Version), DocumentVersion> _versions = new();
 
-    public Task<Document?> GetAsync(Guid documentUniqueId, CancellationToken cancellationToken = default)
-    {
-        _documents.TryGetValue(documentUniqueId, out var document);
-        return Task.FromResult(document);
-    }
+    public Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+        => Task.FromResult(Find(holder, documentUniqueId));
 
-    public Task<IReadOnlyList<Document>> ListByTenantAsync(string tenantSlug, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<Document>> ListAsync(string holder, CancellationToken cancellationToken = default)
     {
-        Guard.NotWhiteSpace(tenantSlug);
+        Guard.NotNull(holder);
 
         var result = _documents.Values
-            .Where(d => d.TenantSlug == tenantSlug && d.Status == DocumentStatus.Active)
+            .Where(d => d.Holder == holder && d.Status == DocumentStatus.Active)
             .OrderByDescending(d => d.CreatedAt)
             .ToList();
         return Task.FromResult<IReadOnlyList<Document>>(result);
@@ -47,6 +44,9 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     {
         Guard.NotNull(document);
 
+        if (Find(document.Holder, document.DocumentUniqueId) is null)
+            return Task.CompletedTask;
+
         _documents[document.DocumentUniqueId] = document;
         if (newVersion is not null)
             _versions[(newVersion.DocumentUniqueId, newVersion.VersionNumber)] = newVersion;
@@ -54,37 +54,48 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.CompletedTask;
     }
 
-    public Task SetStatusAsync(Guid documentUniqueId, DocumentStatus status, string modifiedBy, DateTimeOffset modifiedAt, CancellationToken cancellationToken = default)
+    public Task SetStatusAsync(string holder, Guid documentUniqueId, DocumentStatus status, string modifiedBy, DateTimeOffset modifiedAt, CancellationToken cancellationToken = default)
     {
-        if (_documents.TryGetValue(documentUniqueId, out var document))
+        if (Find(holder, documentUniqueId) is { } document)
             _documents[documentUniqueId] = document with { Status = status, ModifiedBy = modifiedBy, ModifiedAt = modifiedAt };
 
         return Task.CompletedTask;
     }
 
-    public Task<int> GetMaxVersionNumberAsync(Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task<int> GetMaxVersionNumberAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        var max = _versions.Keys
-            .Where(k => k.Id == documentUniqueId)
-            .Select(k => k.Version)
+        var max = Versions(holder, documentUniqueId)
+            .Select(v => v.VersionNumber)
             .DefaultIfEmpty(0)
             .Max();
         return Task.FromResult(max);
     }
 
-    public Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        var result = _versions
-            .Where(kv => kv.Key.Id == documentUniqueId)
-            .Select(kv => kv.Value)
+        var result = Versions(holder, documentUniqueId)
             .OrderBy(v => v.VersionNumber)
             .ToList();
         return Task.FromResult<IReadOnlyList<DocumentVersion>>(result);
     }
 
-    public Task<DocumentVersion?> GetVersionAsync(Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
+    public Task<DocumentVersion?> GetVersionAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
     {
-        _versions.TryGetValue((documentUniqueId, versionNumber), out var version);
+        var version = Find(holder, documentUniqueId) is not null
+            && _versions.TryGetValue((documentUniqueId, versionNumber), out var found)
+            ? found
+            : null;
         return Task.FromResult(version);
     }
+
+    private Document? Find(string holder, Guid documentUniqueId)
+    {
+        Guard.NotNull(holder);
+        return _documents.TryGetValue(documentUniqueId, out var document) && document.Holder == holder ? document : null;
+    }
+
+    private IEnumerable<DocumentVersion> Versions(string holder, Guid documentUniqueId)
+        => Find(holder, documentUniqueId) is null
+            ? []
+            : _versions.Where(kv => kv.Key.Id == documentUniqueId).Select(kv => kv.Value);
 }

@@ -17,7 +17,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Stellaegis.MultiTenant\Stellaegis.MultiTenant.csproj" />
     <ProjectReference Include="..\..\backplane\Stellaegis.Backplane.Core\Stellaegis.Backplane.Core.csproj" />
   </ItemGroup>
 

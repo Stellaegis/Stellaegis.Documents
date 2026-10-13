@@ -4,8 +4,8 @@ namespace Stellaegis.Documents;
 /// A stored revision of a versioned document. Double key (<see cref="DocumentUniqueId"/> +
 /// <see cref="VersionNumber"/>): the document keeps its stable public identity, only the revision
 /// changes. Carries only its own blob key and audit — no content hash (change detection compares the
-/// incoming content against the current pointer only) and no free-text note (révision semantics
-/// belong to the tenant's own store, not the GED).
+/// incoming content against the current pointer only) and no free-text note (revision semantics
+/// belong to the consumer's own store, not to this module).
 /// </summary>
 public sealed record DocumentVersion
 {
