@@ -6,6 +6,12 @@ namespace Stellaegis.Documents;
 /// </summary>
 public sealed record DocumentUpload
 {
+    /// <summary>The longest <see cref="FileName"/> accepted, in characters.</summary>
+    public const int MaxFileNameLength = 255;
+
+    /// <summary>The longest <see cref="ContentType"/> accepted, in characters.</summary>
+    public const int MaxContentTypeLength = 255;
+
     /// <summary>The content, read to its end by the service. The caller keeps ownership and disposes it.</summary>
     public required Stream Content { get; init; }
 

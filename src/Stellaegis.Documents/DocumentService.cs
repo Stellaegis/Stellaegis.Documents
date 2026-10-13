@@ -251,7 +251,7 @@ internal sealed class DocumentService(
     private static DocumentCursor DecodeCursor(string continuationToken)
     {
         Span<byte> bytes = stackalloc byte[24];
-        if (!Base64Url.TryDecodeFromChars(continuationToken, bytes, out var written) || written != bytes.Length)
+        if (!TryDecode(continuationToken, bytes))
             throw new UserFacingException("The continuation token is not valid.");
 
         var ticks = BinaryPrimitives.ReadInt64LittleEndian(bytes[..8]);
@@ -261,12 +261,27 @@ internal sealed class DocumentService(
         return new DocumentCursor(new DateTimeOffset(ticks, TimeSpan.Zero), new Guid(bytes[8..]));
     }
 
+    // TryDecodeFromChars returns false only when the destination is too small: malformed input throws.
+    private static bool TryDecode(string token, Span<byte> bytes)
+    {
+        try
+        {
+            return Base64Url.TryDecodeFromChars(token, bytes, out var written) && written == bytes.Length;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
     private static void CheckUpload(DocumentUpload upload)
     {
         Guard.NotNull(upload);
         Guard.NotNull(upload.Content);
-        Guard.NotWhiteSpace(upload.FileName);
-        Guard.NotWhiteSpace(upload.ContentType);
+        Guard.Satisfies(Guard.NotWhiteSpace(upload.FileName), name => name.Length <= DocumentUpload.MaxFileNameLength,
+            $"A file name has at most {DocumentUpload.MaxFileNameLength} characters.");
+        Guard.Satisfies(Guard.NotWhiteSpace(upload.ContentType), type => type.Length <= DocumentUpload.MaxContentTypeLength,
+            $"A media type has at most {DocumentUpload.MaxContentTypeLength} characters.");
     }
 
     private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, string key, DocumentUpload upload, long contentLength, DateTimeOffset now, string actor)
