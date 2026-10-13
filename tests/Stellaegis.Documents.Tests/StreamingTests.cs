@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Http.Headers;
+
 namespace Stellaegis.Documents.Tests;
 
 /// <summary>Runs alone: allocations are counted for the whole process.</summary>
@@ -53,5 +56,23 @@ public sealed class StreamingTests
         Assert.True(onCreate < Budget, $"Storing {Size} bytes allocated {onCreate}.");
         Assert.True(onUpdate < Budget, $"Replacing {Size} bytes allocated {onUpdate}.");
         Assert.True(onRead < Budget, $"Reading {Size} bytes allocated {onRead}.");
+    }
+
+    [Fact]
+    public async Task An_upload_over_http_streams_from_the_sender_to_the_blob_store()
+    {
+        await using var host = new DocumentsHost();
+        await host.InitializeAsync();
+        var http = host.Http("alice");
+
+        var form = new MultipartFormDataContent { { new StringContent("archive"), "documentType" } };
+        var file = new StreamContent(new GeneratedContent(Size, 3), 81920);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(file, "file", "big.bin");
+
+        var (answer, allocated) = await MeasureAsync(() => http.PostAsync($"/api/t/{Content.NewHolder()}/documents", form, Ct));
+
+        Assert.Equal(HttpStatusCode.Created, answer.StatusCode);
+        Assert.True(allocated < Budget, $"Uploading {Size} bytes over HTTP allocated {allocated}, sender, endpoints and service together.");
     }
 }
