@@ -3,6 +3,7 @@
     <Project Path="src/Stellaegis.Documents/Stellaegis.Documents.csproj" />
     <Project Path="src/Stellaegis.Documents.PostgreSQL/Stellaegis.Documents.PostgreSQL.csproj" />
     <Project Path="src/Stellaegis.Documents.AspNetCore/Stellaegis.Documents.AspNetCore.csproj" />
+    <Project Path="src/Stellaegis.Documents.Client/Stellaegis.Documents.Client.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Stellaegis.Documents.Tests/Stellaegis.Documents.Tests.csproj" />
