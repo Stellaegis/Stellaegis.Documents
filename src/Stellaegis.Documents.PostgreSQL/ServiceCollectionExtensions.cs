@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Stellaegis.Primitives;
 
 namespace Stellaegis.Documents.PostgreSQL;
 
@@ -10,17 +11,19 @@ namespace Stellaegis.Documents.PostgreSQL;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the PostgreSQL document store (<see cref="PostgreSqlDocumentStore"/>) and the document
-    /// domain service layer. A blob adapter must also be registered.
+    /// Registers the PostgreSQL document store, configured from <paramref name="sectionName"/>, and the
+    /// document domain service layer, configured from its own section. A blob adapter must also be
+    /// registered.
     /// </summary>
     public static IServiceCollection AddStellaegisDocumentsPostgreSQL(
         this IServiceCollection services,
         IConfiguration configuration,
-        Action<DocumentsDatabaseOptions> configure)
+        string sectionName = DocumentsDatabaseOptions.SectionName)
     {
-        ArgumentNullException.ThrowIfNull(configure);
+        Guard.NotNull(configuration);
+        Guard.NotWhiteSpace(sectionName);
 
-        services.Configure(configure);
+        services.Configure<DocumentsDatabaseOptions>(configuration.GetSection(sectionName));
         services.TryAddSingleton<IDocumentStore, PostgreSqlDocumentStore>();
         services.AddStellaegisDocumentsServices(configuration);
         return services;

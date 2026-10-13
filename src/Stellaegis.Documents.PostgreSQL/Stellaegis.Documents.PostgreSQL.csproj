@@ -4,21 +4,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Stellaegis.Documents.PostgreSQL</RootNamespace>
     <PackageId>Stellaegis.Documents.PostgreSQL</PackageId>
-    <Description>PostgreSQL persistence for the Stellaegis document domain (schema doc), via Dapper.</Description>
-    <PackageTags>stellaegis;documents;ged;postgresql;dapper</PackageTags>
+    <Description>PostgreSQL store for Stellaegis.Documents (schema doc): documents and versions per holder, file names encrypted with pgcrypto.</Description>
+    <PackageTags>stellaegis;documents;document-management;postgresql</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Dapper" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Options" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Stellaegis.Primitives.Data" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Stellaegis.Documents\Stellaegis.Documents.csproj" />
-    <ProjectReference Include="..\..\database\Stellaegis.Database\Stellaegis.Database.csproj" />
   </ItemGroup>
 
 </Project>
