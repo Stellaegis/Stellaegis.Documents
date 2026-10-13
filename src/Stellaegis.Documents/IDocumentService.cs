@@ -16,7 +16,7 @@ public interface IDocumentService
     /// Stores a new document's content and indexes it. When <paramref name="isVersioned"/> is true,
     /// records it as version 1.
     /// </summary>
-    Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default);
+    Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, bool isVersioned = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Replaces a document's content. Identical content (same hash) is a no-op, whatever its file name

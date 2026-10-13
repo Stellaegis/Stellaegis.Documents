@@ -29,7 +29,7 @@ internal sealed class DocumentService(
     private readonly ILogger<DocumentService> _logger = Guard.NotNull(logger);
     private readonly IEventPublisher _events = Guard.NotNull(events);
 
-    public async Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default)
+    public async Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, bool isVersioned = false, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(holder);
         Guard.NotWhiteSpace(documentType);
@@ -54,7 +54,6 @@ internal sealed class DocumentService(
             FileName = upload.FileName,
             ContentType = upload.ContentType,
             ContentLength = bytes.LongLength,
-            BusinessObjectLink = businessObjectLink,
             Status = DocumentStatus.Active,
             IsVersioned = isVersioned,
             CreatedAt = now,
@@ -182,7 +181,6 @@ internal sealed class DocumentService(
                 DocumentUniqueId = document.DocumentUniqueId,
                 DocumentType = document.DocumentType,
                 ContentHash = document.ContentHash,
-                BusinessObjectLink = document.BusinessObjectLink,
                 IsVersioned = document.IsVersioned,
             },
             cancellationToken);

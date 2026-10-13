@@ -32,8 +32,6 @@ public sealed record Document
     /// <summary>The length of the current content, in bytes.</summary>
     public long ContentLength { get; init; }
 
-    /// <summary>Opaque GUID to the consumer's business entity. The module never interprets it.</summary>
-    public Guid? BusinessObjectLink { get; init; }
 
     /// <summary>Lifecycle status.</summary>
     public DocumentStatus Status { get; init; } = DocumentStatus.Active;

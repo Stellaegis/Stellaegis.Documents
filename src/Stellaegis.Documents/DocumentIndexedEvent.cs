@@ -29,9 +29,6 @@ public sealed record DocumentIndexedEvent : IEvent
     /// <summary>SHA-256 (lowercase hex) of the current content — lets a projection detect real changes.</summary>
     public required string ContentHash { get; init; }
 
-    /// <summary>Opaque business object link the consumer set, or <see langword="null"/>. The module never interprets it.</summary>
-    public Guid? BusinessObjectLink { get; init; }
-
     /// <summary>Whether the document keeps a version history.</summary>
     public required bool IsVersioned { get; init; }
 }

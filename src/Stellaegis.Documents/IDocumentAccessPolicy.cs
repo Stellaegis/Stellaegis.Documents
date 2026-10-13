@@ -20,7 +20,7 @@ public enum DocumentAction
 /// <param name="Holder">The holder the document belongs to.</param>
 /// <param name="Actor">The acting subject — the <c>sub</c> claim of the caller's token.</param>
 /// <param name="Action">The attempted operation.</param>
-/// <param name="Document">The resolved document, including its opaque <c>BusinessObjectLink</c>.</param>
+/// <param name="Document">The resolved document.</param>
 public sealed record DocumentAccessRequest(
     string Holder,
     string Actor,
@@ -37,7 +37,8 @@ public sealed record DocumentAccessRequest(
 /// <para>
 /// The default implementation (<see cref="AllowAllDocumentAccessPolicy"/>) authorizes everything,
 /// preserving holder-grain access. A consumer needing finer grain registers its own implementation,
-/// typically resolving the document's opaque <c>BusinessObjectLink</c> against its own business database.
+/// typically looking the document's public GUID up in its own business database, where it links the
+/// document to its own objects.
 /// </para>
 /// <para>
 /// This hook governs <b>point access</b> only — one document at a time. Business listing/search
