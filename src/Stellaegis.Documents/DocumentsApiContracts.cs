@@ -56,6 +56,7 @@ public sealed record DocumentResponse(
 /// <param name="FileName">File name of this revision.</param>
 /// <param name="ContentType">Media type of this revision.</param>
 /// <param name="ContentLength">Length of this revision, in bytes.</param>
+/// <param name="ContentHash">SHA-256 (lowercase hex) of this revision's content.</param>
 /// <param name="CreatedAt">Creation instant.</param>
 /// <param name="CreatedBy">Creator subject.</param>
 public sealed record DocumentVersionResponse(
@@ -63,6 +64,7 @@ public sealed record DocumentVersionResponse(
     string FileName,
     string ContentType,
     long ContentLength,
+    string ContentHash,
     DateTimeOffset CreatedAt,
     string CreatedBy)
 {
@@ -72,6 +74,7 @@ public sealed record DocumentVersionResponse(
         version.FileName,
         version.ContentType,
         version.ContentLength,
+        version.ContentHash,
         version.CreatedAt,
         version.CreatedBy);
 }

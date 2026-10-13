@@ -23,4 +23,10 @@ public sealed record DocumentUpload
 
     /// <summary>The media type of the content, as declared by the uploader (e.g. <c>application/pdf</c>).</summary>
     public required string ContentType { get; init; }
+
+    /// <summary>
+    /// The SHA-256 (hex, lowercase) the sender computed, or <see langword="null"/>. When given, the service
+    /// refuses content whose digest differs: content damaged on its way is never stored.
+    /// </summary>
+    public string? ExpectedContentHash { get; init; }
 }

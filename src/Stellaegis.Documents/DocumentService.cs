@@ -48,7 +48,7 @@ internal sealed class DocumentService(
         Guard.NotWhiteSpace(actor);
 
         var bytes = await ReadAllAsync(upload.Content, cancellationToken).ConfigureAwait(false);
-        var hash = HashHex(bytes);
+        var hash = HashChecked(bytes, upload);
         var id = Guid.NewGuid();
 
         await WriteBlobAsync(holder, id, 1, bytes, cancellationToken).ConfigureAwait(false);
@@ -70,7 +70,7 @@ internal sealed class DocumentService(
             CreatedBy = actor,
         };
         var initialVersion = isVersioned
-            ? NewVersion(id, 1, upload, bytes.LongLength, now, actor)
+            ? NewVersion(id, 1, upload, bytes.LongLength, hash, now, actor)
             : null;
 
         await _store.CreateAsync(document, initialVersion, cancellationToken).ConfigureAwait(false);
@@ -89,7 +89,7 @@ internal sealed class DocumentService(
             throw new DocumentNotFoundException(documentUniqueId);
 
         var bytes = await ReadAllAsync(upload.Content, cancellationToken).ConfigureAwait(false);
-        var hash = HashHex(bytes);
+        var hash = HashChecked(bytes, upload);
         if (string.Equals(hash, current.ContentHash, StringComparison.Ordinal))
             return current; // identical content: neither overwrite nor a superfluous version
 
@@ -102,7 +102,7 @@ internal sealed class DocumentService(
             await WriteBlobAsync(holder, documentUniqueId, next, bytes, cancellationToken).ConfigureAwait(false);
 
             var updated = current with { VersionNumber = next, ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
-            var version = NewVersion(documentUniqueId, next, upload, bytes.LongLength, now, actor);
+            var version = NewVersion(documentUniqueId, next, upload, bytes.LongLength, hash, now, actor);
             await _store.UpdateCurrentAsync(updated, version, cancellationToken).ConfigureAwait(false);
             await PublishIndexedAsync(updated, now, cancellationToken).ConfigureAwait(false);
             return updated;
@@ -288,7 +288,7 @@ internal sealed class DocumentService(
             $"A media type has at most {DocumentUpload.MaxContentTypeLength} characters.");
     }
 
-    private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, DocumentUpload upload, long contentLength, DateTimeOffset now, string actor)
+    private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, DocumentUpload upload, long contentLength, string contentHash, DateTimeOffset now, string actor)
         => new()
         {
             DocumentUniqueId = documentUniqueId,
@@ -296,11 +296,18 @@ internal sealed class DocumentService(
             FileName = upload.FileName,
             ContentType = upload.ContentType,
             ContentLength = contentLength,
+            ContentHash = contentHash,
             CreatedAt = now,
             CreatedBy = actor,
         };
 
-    private static string HashHex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+    private static string HashChecked(byte[] bytes, DocumentUpload upload)
+    {
+        var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        if (upload.ExpectedContentHash is { } expected && !string.Equals(expected, hash, StringComparison.OrdinalIgnoreCase))
+            throw new UserFacingException("The content does not match its digest: it was damaged on its way.");
+        return hash;
+    }
 
     private static async Task<byte[]> ReadAllAsync(Stream content, CancellationToken cancellationToken)
     {

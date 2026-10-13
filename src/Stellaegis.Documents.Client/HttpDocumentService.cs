@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Stellaegis.Primitives;
 
@@ -22,6 +23,13 @@ namespace Stellaegis.Documents.Client;
 /// <para>
 /// Answers map to the exceptions of the in-process service: 404 to <see cref="DocumentNotFoundException"/>,
 /// 400, 401, 403 and 409 to a <see cref="UserFacingException"/> of the matching <see cref="ErrorType"/>.
+/// </para>
+/// <para>
+/// Integrity, end to end: an upload carries the SHA-256 of its content as <c>Content-Digest</c> — the one the
+/// caller set in <see cref="DocumentUpload.ExpectedContentHash"/>, or one computed here when the content can
+/// be read twice (a seekable stream) — and the server refuses content that does not match. A download is
+/// checked against the server's <c>Repr-Digest</c> as it is read: its end throws
+/// <see cref="InvalidDataException"/> when the content was damaged on its way.
 /// </para>
 /// </remarks>
 internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath holderPath) : IDocumentService
@@ -103,6 +111,7 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
             FileName = v.FileName,
             ContentType = v.ContentType,
             ContentLength = v.ContentLength,
+            ContentHash = v.ContentHash,
             CreatedAt = v.CreatedAt,
             CreatedBy = v.CreatedBy,
         }).ToList();
@@ -136,6 +145,9 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         {
             await EnsureSuccessAsync(response, documentUniqueId, cancellationToken).ConfigureAwait(false);
             var content = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            if (ContentDigest.TryReadSha256(Header(response, "Repr-Digest"), out var expected))
+                content = new DigestCheckingStream(content, expected);
+
             return new ResponseContentStream(response, content);
         }
         catch
@@ -149,11 +161,34 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
 
     private static MultipartFormDataContent Form(DocumentUpload upload)
     {
-        var file = new StreamContent(Guard.NotNull(upload.Content));
+        var content = Guard.NotNull(upload.Content);
+        var hash = upload.ExpectedContentHash ?? HashIfSeekable(content);
+
+        var file = new StreamContent(content);
         file.Headers.ContentType = MediaTypeHeaderValue.Parse(upload.ContentType);
-        var form = new MultipartFormDataContent { { file, "file", upload.FileName } };
-        return form;
+        if (hash is not null)
+            file.Headers.Add("Content-Digest", ContentDigest.Format(hash));
+
+        return new MultipartFormDataContent { { file, "file", upload.FileName } };
     }
+
+    // A forward-only stream cannot be hashed before it is sent without being held in memory: it goes
+    // unchecked, unless the caller supplied its digest.
+    private static string? HashIfSeekable(Stream content)
+    {
+        if (!content.CanSeek)
+            return null;
+
+        var start = content.Position;
+        var hash = Convert.ToHexStringLower(SHA256.HashData(content));
+        content.Position = start;
+        return hash;
+    }
+
+    private static string? Header(HttpResponseMessage response, string name)
+        => response.Headers.TryGetValues(name, out var values) || response.Content.Headers.TryGetValues(name, out values)
+            ? string.Join(", ", values)
+            : null;
 
     private static async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
         => await response.Content.ReadFromJsonAsync<T>(cancellationToken).ConfigureAwait(false)

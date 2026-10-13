@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Net.Http.Headers;
 using Stellaegis.Primitives;
 
 namespace Stellaegis.Documents.AspNetCore;
@@ -22,6 +23,9 @@ namespace Stellaegis.Documents.AspNetCore;
 ///   <item><c>PUT documents/{id}/content</c> — replace its content (same multipart form, <c>file</c> only)</item>
 ///   <item><c>GET documents/{id}/content</c> — its content: a redirect to a pre-signed URL when the blob store
 ///   offers one, the content streamed otherwise</item>
+///   <item>a streamed content carries its SHA-256 as <c>Repr-Digest</c> (RFC 9530) and as a strong <c>ETag</c>,
+///   and answers <c>Range</c> requests, so an interrupted download resumes; the <c>file</c> part of an upload
+///   may carry a <c>Content-Digest</c>, and content that does not match it is refused with <c>400</c></item>
 ///   <item><c>GET documents/{id}/versions</c> and <c>GET documents/{id}/versions/{n}/content</c> — its history</item>
 ///   <item><c>DELETE documents/{id}</c> — move it to the trash</item>
 /// </list>
@@ -102,9 +106,11 @@ public static class EndpointRouteBuilderExtensions
                     return Results.Problem("A 'documentType' field is required.", statusCode: StatusCodes.Status400BadRequest);
 
                 var isVersioned = bool.TryParse(form["isVersioned"], out var versioned) && versioned;
+                if (!TryReadDigest(file, out var expectedHash))
+                    return Results.Problem("The 'Content-Digest' of the 'file' part is malformed.", statusCode: StatusCodes.Status400BadRequest);
 
                 await using var content = file.OpenReadStream();
-                var document = await documents.CreateAsync(caller.Holder, documentType, Upload(file, content), caller.Actor, isVersioned, ct);
+                var document = await documents.CreateAsync(caller.Holder, documentType, Upload(file, content, expectedHash), caller.Actor, isVersioned, ct);
                 return Results.Created($"{http.Request.PathBase}{http.Request.Path.Value?.TrimEnd('/')}/{document.DocumentUniqueId:N}", DocumentResponse.From(document));
             })
             .RequireAuthorization(writePolicy)
@@ -152,9 +158,11 @@ public static class EndpointRouteBuilderExtensions
                 var form = await ReadFormAsync(http, ct);
                 if (form is null || form.Files["file"] is not { } file)
                     return Results.Problem("A multipart/form-data request with a 'file' part is required.", statusCode: StatusCodes.Status400BadRequest);
+                if (!TryReadDigest(file, out var expectedHash))
+                    return Results.Problem("The 'Content-Digest' of the 'file' part is malformed.", statusCode: StatusCodes.Status400BadRequest);
 
                 await using var content = file.OpenReadStream();
-                var document = await documents.UpdateContentAsync(access.Holder, id, Upload(file, content), access.Actor, ct);
+                var document = await documents.UpdateContentAsync(access.Holder, id, Upload(file, content, expectedHash), access.Actor, ct);
                 return Results.Ok(DocumentResponse.From(document));
             })
             .RequireAuthorization(writePolicy)
@@ -174,7 +182,7 @@ public static class EndpointRouteBuilderExtensions
 
                 var document = access.Document!;
                 var stream = await documents.OpenContentAsync(access.Holder, id, ct);
-                return Results.Stream(stream, document.ContentType, document.FileName);
+                return Content(http, stream, document.ContentType, document.FileName, document.ContentHash);
             })
             .RequireAuthorization(readPolicy)
             .WithName("GetDocumentContent");
@@ -203,7 +211,7 @@ public static class EndpointRouteBuilderExtensions
                     return Results.NotFound();
 
                 var stream = await documents.OpenVersionContentAsync(access.Holder, id, version, ct);
-                return Results.Stream(stream, revision.ContentType, revision.FileName);
+                return Content(http, stream, revision.ContentType, revision.FileName, revision.ContentHash);
             })
             .RequireAuthorization(readPolicy)
             .WithName("GetDocumentVersionContent");
@@ -293,12 +301,37 @@ public static class EndpointRouteBuilderExtensions
     private static async Task<IFormCollection?> ReadFormAsync(HttpContext http, CancellationToken ct)
         => http.Request.HasFormContentType ? await http.Request.ReadFormAsync(ct) : null;
 
-    private static DocumentUpload Upload(IFormFile file, Stream content) => new()
+    private static DocumentUpload Upload(IFormFile file, Stream content, string? expectedHash) => new()
     {
         Content = content,
         FileName = Path.GetFileName(file.FileName),
         ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+        ExpectedContentHash = expectedHash,
     };
+
+    // Absent: nothing to check. Present without a readable SHA-256 entry: refused, rather than stored unchecked.
+    private static bool TryReadDigest(IFormFile file, out string? expectedHash)
+    {
+        expectedHash = null;
+        var header = file.Headers["Content-Digest"].ToString();
+        if (string.IsNullOrWhiteSpace(header))
+            return true;
+
+        if (!ContentDigest.TryReadSha256(header, out var hash))
+            return false;
+
+        expectedHash = hash;
+        return true;
+    }
+
+    // Repr-Digest describes the whole content, so it stays true on a partial (Range) answer, where a
+    // Content-Digest would describe only the bytes sent.
+    private static IResult Content(HttpContext http, Stream stream, string contentType, string fileName, string contentHash)
+    {
+        http.Response.Headers["Repr-Digest"] = ContentDigest.Format(contentHash);
+        return Results.Stream(stream, contentType, fileName,
+            entityTag: new EntityTagHeaderValue($"\"{contentHash}\""), enableRangeProcessing: true);
+    }
 
     private static async ValueTask<object?> AnswerUserFacingErrors(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {

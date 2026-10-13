@@ -26,7 +26,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
 
     private static readonly string VersionColumns =
         "v.document_unique_id, v.version_number, " +
-        string.Format(DecryptFileName, "v") + ", v.content_type, v.content_length, v.created_at, v.created_by";
+        string.Format(DecryptFileName, "v") + ", v.content_type, v.content_length, v.content_hash, v.created_at, v.created_by";
 
     private readonly string _connectionString;
     private readonly int _activeKeySlot;
@@ -254,11 +254,11 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         => connection.ExecuteAsync(new CommandDefinition(
             """
             insert into doc.document_versions
-              (document_unique_id, version_number, file_name, content_type, content_length, key_slot,
+              (document_unique_id, version_number, file_name, content_type, content_length, content_hash, key_slot,
                created_at, created_by)
             values
               (@DocumentUniqueId, @VersionNumber, pgp_sym_encrypt(@FileName, @ActivePassphrase),
-               @ContentType, @ContentLength, @KeySlot, @CreatedAt, @CreatedBy)
+               @ContentType, @ContentLength, @ContentHash, @KeySlot, @CreatedAt, @CreatedBy)
             """,
             new
             {
@@ -268,6 +268,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
                 ActivePassphrase = _activePassphrase,
                 version.ContentType,
                 version.ContentLength,
+                version.ContentHash,
                 KeySlot = (short)_activeKeySlot,
                 version.CreatedAt,
                 version.CreatedBy,
@@ -347,6 +348,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         public string FileName { get; set; } = string.Empty;
         public string ContentType { get; set; } = string.Empty;
         public long ContentLength { get; set; }
+        public string ContentHash { get; set; } = string.Empty;
         public DateTimeOffset CreatedAt { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
 
@@ -357,6 +359,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             FileName = FileName,
             ContentType = ContentType,
             ContentLength = ContentLength,
+            ContentHash = ContentHash,
             CreatedAt = CreatedAt,
             CreatedBy = CreatedBy,
         };

@@ -73,7 +73,7 @@ comment on column doc.documents.holder is
 comment on column doc.documents.version_number is
   'Version of the current content, from 1. A document that is not versioned stays at 1, its content replaced in place; the blob key derives from it.';
 comment on column doc.documents.content_hash is
-  'SHA-256 of the current content (lowercase hex). Identical content sent again neither overwrites nor adds a version.';
+  'SHA-256 of the current content (lowercase hex). Identical content sent again neither overwrites nor adds a version; a download serves it as Repr-Digest and ETag.';
 comment on column doc.documents.file_name is
   'File name given by the uploader, encrypted by pgp_sym_encrypt with the passphrase of key_slot. Sensitive: never decrypt it in a view or a log. Its length is checked by the module, before encryption.';
 comment on column doc.documents.key_slot is
@@ -93,6 +93,7 @@ create table doc.document_versions (
   file_name           bytea       not null,
   content_type        text        not null,
   content_length      bigint      not null,
+  content_hash        text        not null,
   key_slot            smallint    not null,
 
   created_at          timestamptz not null default now(),
@@ -104,6 +105,7 @@ create table doc.document_versions (
   constraint ck_document_versions_version_number check (version_number >= 1),
   constraint ck_document_versions_content_type check (char_length(content_type) between 1 and 255),
   constraint ck_document_versions_content_length check (content_length >= 0),
+  constraint ck_document_versions_content_hash check (content_hash ~ '^[0-9a-f]{64}$'),
   constraint ck_document_versions_key_slot check (key_slot in (1, 2)),
   constraint ck_document_versions_created_by check (char_length(created_by) between 1 and 128)
 );
