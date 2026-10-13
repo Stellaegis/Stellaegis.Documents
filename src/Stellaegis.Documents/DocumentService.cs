@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Buffers.Text;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -27,6 +29,8 @@ internal sealed class DocumentService(
     private readonly IBlobStore _blobStore = Guard.NotNull(blobStore);
     private readonly string _blobSpace = Guard.NotWhiteSpace(Guard.NotNull(options).Value.BlobSpace);
     private readonly ILogger<DocumentService> _logger = Guard.NotNull(logger);
+    private readonly int _listPageSize = Guard.Satisfies(Guard.NotNull(options).Value.ListPageSize, size => size is >= 1 and <= 1000,
+        $"{nameof(DocumentsOptions)}.{nameof(DocumentsOptions.ListPageSize)} must be between 1 and 1000.");
     private readonly IEventPublisher _events = Guard.NotNull(events);
 
     public async Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, bool isVersioned = false, CancellationToken cancellationToken = default)
@@ -130,8 +134,20 @@ internal sealed class DocumentService(
     public Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
         => _store.GetAsync(Guard.NotNull(holder), documentUniqueId, cancellationToken);
 
-    public Task<IReadOnlyList<Document>> ListAsync(string holder, CancellationToken cancellationToken = default)
-        => _store.ListAsync(Guard.NotNull(holder), cancellationToken);
+    public async Task<DocumentPage> ListAsync(string holder, string? continuationToken = null, CancellationToken cancellationToken = default)
+    {
+        Guard.NotNull(holder);
+        var after = continuationToken is null ? null : DecodeCursor(continuationToken);
+
+        // One more than a page tells whether a next page exists without a second query.
+        var documents = await _store.ListAsync(holder, after, _listPageSize + 1, cancellationToken).ConfigureAwait(false);
+        if (documents.Count <= _listPageSize)
+            return new DocumentPage(documents, null);
+
+        var page = documents.Take(_listPageSize).ToList();
+        var last = page[^1];
+        return new DocumentPage(page, EncodeCursor(new DocumentCursor(last.CreatedAt, last.DocumentUniqueId)));
+    }
 
     public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
@@ -208,6 +224,29 @@ internal sealed class DocumentService(
         => _blobStore.WriteAsync(Location(holder, key), new MemoryStream(bytes, writable: false), cancellationToken);
 
     private BlobLocation Location(string holder, string key) => new(holder, _blobSpace, key);
+
+    // A token only positions a list the store already scopes to the holder: altering it moves the page,
+    // it never reaches another holder's documents.
+    private static string EncodeCursor(DocumentCursor cursor)
+    {
+        var bytes = new byte[24];
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(0, 8), cursor.CreatedAt.UtcTicks);
+        cursor.DocumentUniqueId.TryWriteBytes(bytes.AsSpan(8, 16));
+        return Base64Url.EncodeToString(bytes);
+    }
+
+    private static DocumentCursor DecodeCursor(string continuationToken)
+    {
+        Span<byte> bytes = stackalloc byte[24];
+        if (!Base64Url.TryDecodeFromChars(continuationToken, bytes, out var written) || written != bytes.Length)
+            throw new UserFacingException("The continuation token is not valid.");
+
+        var ticks = BinaryPrimitives.ReadInt64LittleEndian(bytes[..8]);
+        if (ticks < DateTimeOffset.MinValue.UtcTicks || ticks > DateTimeOffset.MaxValue.UtcTicks)
+            throw new UserFacingException("The continuation token is not valid.");
+
+        return new DocumentCursor(new DateTimeOffset(ticks, TimeSpan.Zero), new Guid(bytes[8..]));
+    }
 
     private static void CheckUpload(DocumentUpload upload)
     {

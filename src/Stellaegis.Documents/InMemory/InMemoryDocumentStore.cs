@@ -16,13 +16,16 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     public Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
         => Task.FromResult(Find(holder, documentUniqueId));
 
-    public Task<IReadOnlyList<Document>> ListAsync(string holder, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<Document>> ListAsync(string holder, DocumentCursor? after, int limit, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(holder);
 
         var result = _documents.Values
             .Where(d => d.Holder == holder && d.Status == DocumentStatus.Active)
+            .Where(d => after is null || IsAfter(d, after))
             .OrderByDescending(d => d.CreatedAt)
+            .ThenByDescending(d => d.DocumentUniqueId)
+            .Take(limit)
             .ToList();
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
@@ -107,6 +110,10 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
 
         return Task.CompletedTask;
     }
+
+    private static bool IsAfter(Document document, DocumentCursor cursor)
+        => document.CreatedAt < cursor.CreatedAt
+           || (document.CreatedAt == cursor.CreatedAt && document.DocumentUniqueId.CompareTo(cursor.DocumentUniqueId) < 0);
 
     private Document? Find(string holder, Guid documentUniqueId)
     {

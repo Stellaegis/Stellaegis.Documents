@@ -13,4 +13,7 @@ public sealed class DocumentsOptions
     /// name for <c>BlobLocation</c> (Stellaegis.Blobs): at most 63 characters.
     /// </summary>
     public string BlobSpace { get; init; } = "documents";
+
+    /// <summary>The number of documents in one page of a list. Between 1 and 1000.</summary>
+    public int ListPageSize { get; init; } = 100;
 }

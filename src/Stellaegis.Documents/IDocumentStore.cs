@@ -13,8 +13,11 @@ public interface IDocumentStore
     /// <summary>Gets a holder's document by id (any status), or <see langword="null"/>.</summary>
     Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default);
 
-    /// <summary>Lists a holder's active documents.</summary>
-    Task<IReadOnlyList<Document>> ListAsync(string holder, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Lists at most <paramref name="limit"/> of a holder's active documents, most recent first
+    /// (<see cref="DocumentCursor"/> order), starting after <paramref name="after"/> when given.
+    /// </summary>
+    Task<IReadOnlyList<Document>> ListAsync(string holder, DocumentCursor? after, int limit, CancellationToken cancellationToken = default);
 
     /// <summary>Lists all of a holder's documents, whatever their status.</summary>
     Task<IReadOnlyList<Document>> ListAllAsync(string holder, CancellationToken cancellationToken = default);

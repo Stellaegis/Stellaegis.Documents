@@ -1,3 +1,5 @@
+using Stellaegis.Primitives;
+
 namespace Stellaegis.Documents;
 
 /// <summary>
@@ -46,8 +48,12 @@ public interface IDocumentService
     /// <summary>Gets a document's metadata, or <see langword="null"/> when the holder has no such document.</summary>
     Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default);
 
-    /// <summary>Lists the holder's active documents.</summary>
-    Task<IReadOnlyList<Document>> ListAsync(string holder, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Lists one page of the holder's active documents, most recent first. Pass the previous page's
+    /// <see cref="DocumentPage.ContinuationToken"/> to get the next one.
+    /// </summary>
+    /// <exception cref="UserFacingException"><paramref name="continuationToken"/> is not a token this service issued.</exception>
+    Task<DocumentPage> ListAsync(string holder, string? continuationToken = null, CancellationToken cancellationToken = default);
 
     /// <summary>Lists a document's version history.</summary>
     /// <exception cref="DocumentNotFoundException">No document with that id for the holder.</exception>
