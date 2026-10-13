@@ -2,27 +2,37 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
     <RootNamespace>Stellaegis.Documents.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
-    <IsTestProject>true</IsTestProject>
-    <!-- A test project produces no consumable API surface; skip XML doc generation (inherited repo-wide). -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Stellaegis.Blobs.FileSystem" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Stellaegis.Documents\Stellaegis.Documents.csproj" />
-    <ProjectReference Include="..\..\src\blobs\Stellaegis.Blobs\Stellaegis.Blobs.csproj" />
-    <ProjectReference Include="..\..\src\Stellaegis.MultiTenant\Stellaegis.MultiTenant.csproj" />
-    <ProjectReference Include="..\..\src\Stellaegis.Common\Stellaegis.Common.csproj" />
+    <ProjectReference Include="..\..\src\Stellaegis.Documents.PostgreSQL\Stellaegis.Documents.PostgreSQL.csproj" />
+    <ProjectReference Include="..\..\src\Stellaegis.Documents.AspNetCore\Stellaegis.Documents.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Stellaegis.Documents.Client\Stellaegis.Documents.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\docs\sql\stellaegis_documents.sql" Link="sql\stellaegis_documents.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
