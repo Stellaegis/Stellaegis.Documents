@@ -19,8 +19,8 @@ public interface IDocumentStore
     /// </summary>
     Task<IReadOnlyList<Document>> ListAsync(string holder, DocumentCursor? after, int limit, CancellationToken cancellationToken = default);
 
-    /// <summary>Lists all of a holder's documents, whatever their status.</summary>
-    Task<IReadOnlyList<Document>> ListAllAsync(string holder, CancellationToken cancellationToken = default);
+    /// <summary>Lists at most <paramref name="limit"/> of a holder's documents, whatever their status, in no set order.</summary>
+    Task<IReadOnlyList<Document>> ListAnyStatusAsync(string holder, int limit, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates a document and, when supplied, its first version — atomically (one transaction in the

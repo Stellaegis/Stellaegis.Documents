@@ -30,11 +30,11 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
 
-    public Task<IReadOnlyList<Document>> ListAllAsync(string holder, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<Document>> ListAnyStatusAsync(string holder, int limit, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(holder);
 
-        var result = _documents.Values.Where(d => d.Holder == holder).ToList();
+        var result = _documents.Values.Where(d => d.Holder == holder).Take(limit).ToList();
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
 

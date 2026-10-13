@@ -25,6 +25,8 @@ internal sealed class DocumentService(
     IEventPublisher events,
     ILogger<DocumentService> logger) : IDocumentService
 {
+    private const int PurgeBatchSize = 100;
+
     private readonly IDocumentStore _store = Guard.NotNull(store);
     private readonly IBlobStore _blobStore = Guard.NotNull(blobStore);
     private readonly string _blobSpace = Guard.NotWhiteSpace(Guard.NotNull(options).Value.BlobSpace);
@@ -171,21 +173,32 @@ internal sealed class DocumentService(
     {
         Guard.NotWhiteSpace(holder);
 
-        var documents = await _store.ListAllAsync(holder, cancellationToken).ConfigureAwait(false);
-        foreach (var document in documents)
+        // Batches keep memory bounded. Deleted documents leave the next query, so no position is kept:
+        // the purge takes what remains until nothing does.
+        var purged = new HashSet<Guid>();
+        IReadOnlyList<Document> batch;
+        do
         {
-            // Content first: a purge cut between the two leaves metadata that the next call finds and
-            // completes, never content that nothing points to any more.
-            var versions = await _store.GetVersionsAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
-            var keys = versions.Select(v => v.StoragePath).Append(document.StoragePath).Distinct(StringComparer.Ordinal);
-            foreach (var key in keys)
-                await _blobStore.DeleteAsync(Location(holder, key), cancellationToken).ConfigureAwait(false);
+            batch = await _store.ListAnyStatusAsync(holder, PurgeBatchSize, cancellationToken).ConfigureAwait(false);
+            foreach (var document in batch)
+            {
+                if (!purged.Add(document.DocumentUniqueId))
+                    throw new InvalidOperationException($"Document '{document.DocumentUniqueId:N}' is still listed after its deletion: the store did not delete it.");
 
-            await _store.DeleteAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
+                // Content first: a purge cut between the two leaves metadata that the next call finds and
+                // completes, never content that nothing points to any more.
+                var versions = await _store.GetVersionsAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
+                var keys = versions.Select(v => v.StoragePath).Append(document.StoragePath).Distinct(StringComparer.Ordinal);
+                foreach (var key in keys)
+                    await _blobStore.DeleteAsync(Location(holder, key), cancellationToken).ConfigureAwait(false);
+
+                await _store.DeleteAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
+            }
         }
+        while (batch.Count == PurgeBatchSize);
 
-        _logger.LogInformation("Purged {DocumentCount} documents of holder {Holder}.", documents.Count, holder);
-        return documents.Count;
+        _logger.LogInformation("Purged {DocumentCount} documents of holder {Holder}.", purged.Count, holder);
+        return purged.Count;
     }
 
     private Task PublishIndexedAsync(Document document, DateTimeOffset occurredAt, CancellationToken cancellationToken)
