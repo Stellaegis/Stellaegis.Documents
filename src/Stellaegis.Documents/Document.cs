@@ -18,8 +18,8 @@ public sealed record Document
     public required string DocumentType { get; init; }
 
     /// <summary>
-    /// The version number of the current content, from 1. A document that is not versioned stays at 1,
-    /// its content replaced in place.
+    /// The number of the current content, from 1, increased by each change of content. A versioned
+    /// document keeps its former contents as versions; one that is not versioned keeps only the current.
     /// </summary>
     public int VersionNumber { get; init; } = 1;
 

@@ -22,8 +22,8 @@ public interface IDocumentService
 
     /// <summary>
     /// Replaces a document's content. Identical content (same hash) is a no-op, whatever its file name
-    /// and media type; otherwise a versioned document gains a new revision while a non-versioned one is
-    /// overwritten in place, file metadata included.
+    /// and media type; otherwise the document moves to its next content number, file metadata included,
+    /// and a versioned document keeps the former content as a revision.
     /// </summary>
     /// <exception cref="DocumentNotFoundException">No active document with that id for the holder.</exception>
     Task<Document> UpdateContentAsync(string holder, Guid documentUniqueId, DocumentUpload upload, string actor, CancellationToken cancellationToken = default);

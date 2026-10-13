@@ -12,9 +12,10 @@
 -- Isolation: every document carries its holder, and every query of the store
 -- filters on it. The empty holder is the platform.
 --
--- Content: one blob per document version, stored flat under a key the module
--- derives from the identity alone, {document_unique_id:N}-{version_number}. No
--- key is stored here.
+-- Content: one blob per content, stored flat under a key the module derives
+-- from the identity alone, {document_unique_id:N}-{version_number}. No key is
+-- stored here. A change of content always goes to the next number, so no
+-- content is overwritten in place.
 --
 -- Keys: document_unique_id is the primary key, and doc.document_versions carries
 -- it as its foreign key. There is no bigint surrogate on purpose: every access
@@ -71,7 +72,7 @@ comment on column doc.documents.document_unique_id is
 comment on column doc.documents.holder is
   'The party the document belongs to; empty for the platform. Same grammar as the holder of a Stellaegis.Blobs location, which the check repeats.';
 comment on column doc.documents.version_number is
-  'Version of the current content, from 1. A document that is not versioned stays at 1, its content replaced in place; the blob key derives from it.';
+  'Number of the current content, from 1, increased by each change of content; the blob key derives from it. A versioned document keeps its former contents in doc.document_versions; one that is not versioned keeps only the current.';
 comment on column doc.documents.content_hash is
   'SHA-256 of the current content (lowercase hex). Identical content sent again neither overwrites nor adds a version; a download serves it as Repr-Digest and ETag.';
 comment on column doc.documents.file_name is

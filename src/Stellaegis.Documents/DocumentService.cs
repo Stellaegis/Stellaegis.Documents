@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Buffers.Text;
-using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Stellaegis.Blobs;
@@ -14,14 +13,23 @@ namespace Stellaegis.Documents;
 /// cleanable orphan blob rather than a dangling pointer).
 /// </summary>
 /// <remarks>
-/// Content is stored flat, one blob per document version, under a key derived from the document's
-/// identity alone: <c>{id:N}-{version}</c>. No key is stored, so nothing about the storage layout reaches
-/// the document, the store or the database.
-/// </remarks>
-/// <remarks>
+/// <para>
+/// Content is stored flat, one blob per content, under a key derived from the document's identity alone:
+/// <c>{id:N}-{version}</c>. No key is stored, so nothing about the storage layout reaches the document, the
+/// store or the database.
+/// </para>
+/// <para>
+/// Content streams through: it is hashed and counted on its way to the blob store, never held in memory.
+/// Each change of content goes to the next number, versioned document or not, and the document's
+/// pointer slides to it once the new content is complete and checked: no content is ever overwritten in
+/// place, so a reader always gets a whole one. A versioned document keeps its former contents as its
+/// history; a document that is not versioned has its former content deleted after the pointer moved.
+/// </para>
+/// <para>
 /// Publishes <see cref="DocumentIndexedEvent"/> on create/content-change and <see cref="DocumentTrashedEvent"/>
 /// on trash through <see cref="IEventPublisher"/>, after the metadata is stored, so consumers can maintain
 /// their own search projection. Without a host transport the publisher is <see cref="NullEventPublisher"/>.
+/// </para>
 /// </remarks>
 internal sealed class DocumentService(
     IDocumentStore store,
@@ -47,11 +55,8 @@ internal sealed class DocumentService(
         CheckUpload(upload);
         Guard.NotWhiteSpace(actor);
 
-        var bytes = await ReadAllAsync(upload.Content, cancellationToken).ConfigureAwait(false);
-        var hash = HashChecked(bytes, upload);
         var id = Guid.NewGuid();
-
-        await WriteBlobAsync(holder, id, 1, bytes, cancellationToken).ConfigureAwait(false);
+        var (hash, length) = await WriteCheckedAsync(holder, id, 1, upload, cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
         var document = new Document
@@ -63,14 +68,14 @@ internal sealed class DocumentService(
             ContentHash = hash,
             FileName = upload.FileName,
             ContentType = upload.ContentType,
-            ContentLength = bytes.LongLength,
+            ContentLength = length,
             Status = DocumentStatus.Active,
             IsVersioned = isVersioned,
             CreatedAt = now,
             CreatedBy = actor,
         };
         var initialVersion = isVersioned
-            ? NewVersion(id, 1, upload, bytes.LongLength, hash, now, actor)
+            ? NewVersion(id, 1, upload, length, hash, now, actor)
             : null;
 
         await _store.CreateAsync(document, initialVersion, cancellationToken).ConfigureAwait(false);
@@ -88,32 +93,40 @@ internal sealed class DocumentService(
         if (current is null || current.Status != DocumentStatus.Active)
             throw new DocumentNotFoundException(documentUniqueId);
 
-        var bytes = await ReadAllAsync(upload.Content, cancellationToken).ConfigureAwait(false);
-        var hash = HashChecked(bytes, upload);
+        // The sender's digest equals the current one: the content is the same, there is nothing to read.
+        if (string.Equals(upload.ExpectedContentHash, current.ContentHash, StringComparison.OrdinalIgnoreCase))
+            return current;
+
+        // Known limit: two concurrent updates compute the same number. The store refuses the second
+        // revision, but its content has already replaced the first one's under the shared key.
+        var next = current.VersionNumber + 1;
+        var (hash, length) = await WriteCheckedAsync(holder, documentUniqueId, next, upload, cancellationToken).ConfigureAwait(false);
         if (string.Equals(hash, current.ContentHash, StringComparison.Ordinal))
-            return current; // identical content: neither overwrite nor a superfluous version
-
-        var now = DateTimeOffset.UtcNow;
-        if (current.IsVersioned)
         {
-            // Known limit: two concurrent updates compute the same number. The store refuses the second
-            // revision, but its content has already replaced the first one's under the shared key.
-            var next = current.VersionNumber + 1;
-            await WriteBlobAsync(holder, documentUniqueId, next, bytes, cancellationToken).ConfigureAwait(false);
-
-            var updated = current with { VersionNumber = next, ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
-            var version = NewVersion(documentUniqueId, next, upload, bytes.LongLength, hash, now, actor);
-            await _store.UpdateCurrentAsync(updated, version, cancellationToken).ConfigureAwait(false);
-            await PublishIndexedAsync(updated, now, cancellationToken).ConfigureAwait(false);
-            return updated;
+            // Identical content: neither a change nor a superfluous version.
+            await DeleteBlobAsync(holder, documentUniqueId, next, cancellationToken).ConfigureAwait(false);
+            return current;
         }
 
-        // Not versioned: the content is replaced in place, under the same version number.
-        await WriteBlobAsync(holder, documentUniqueId, current.VersionNumber, bytes, cancellationToken).ConfigureAwait(false);
-        var overwritten = current with { ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
-        await _store.UpdateCurrentAsync(overwritten, null, cancellationToken).ConfigureAwait(false);
-        await PublishIndexedAsync(overwritten, now, cancellationToken).ConfigureAwait(false);
-        return overwritten;
+        var now = DateTimeOffset.UtcNow;
+        var updated = current with { VersionNumber = next, ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = length, ModifiedAt = now, ModifiedBy = actor };
+        var version = current.IsVersioned ? NewVersion(documentUniqueId, next, upload, length, hash, now, actor) : null;
+        try
+        {
+            await _store.UpdateCurrentAsync(updated, version, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await DeleteBlobAsync(holder, documentUniqueId, next, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+
+        // Without history, the former content goes once nothing points to it any more.
+        if (!current.IsVersioned)
+            await DeleteBlobAsync(holder, documentUniqueId, current.VersionNumber, CancellationToken.None).ConfigureAwait(false);
+
+        await PublishIndexedAsync(updated, now, cancellationToken).ConfigureAwait(false);
+        return updated;
     }
 
     public async Task<Stream> OpenContentAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
@@ -236,8 +249,26 @@ internal sealed class DocumentService(
         throw new DocumentNotFoundException(documentUniqueId);
     }
 
-    private Task WriteBlobAsync(string holder, Guid documentUniqueId, int versionNumber, byte[] bytes, CancellationToken cancellationToken)
-        => _blobStore.WriteAsync(Location(holder, documentUniqueId, versionNumber), new MemoryStream(bytes, writable: false), cancellationToken);
+    // Streams the content to its blob while hashing it, then checks it against the sender's digest: content
+    // that does not match is deleted before anything points to it.
+    private async Task<(string Hash, long Length)> WriteCheckedAsync(
+        string holder, Guid documentUniqueId, int versionNumber, DocumentUpload upload, CancellationToken cancellationToken)
+    {
+        using var hashing = new HashingStream(upload.Content);
+        await _blobStore.WriteAsync(Location(holder, documentUniqueId, versionNumber), hashing, cancellationToken).ConfigureAwait(false);
+
+        var hash = hashing.ContentHash;
+        if (upload.ExpectedContentHash is { } expected && !string.Equals(expected, hash, StringComparison.OrdinalIgnoreCase))
+        {
+            await DeleteBlobAsync(holder, documentUniqueId, versionNumber, CancellationToken.None).ConfigureAwait(false);
+            throw new UserFacingException("The content does not match its digest: it was damaged on its way.");
+        }
+
+        return (hash, hashing.ContentLength);
+    }
+
+    private Task DeleteBlobAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken)
+        => _blobStore.DeleteAsync(Location(holder, documentUniqueId, versionNumber), cancellationToken);
 
     private BlobLocation Location(string holder, Guid documentUniqueId, int versionNumber)
         => new(holder, _blobSpace, $"{documentUniqueId:N}-{versionNumber}");
@@ -301,21 +332,4 @@ internal sealed class DocumentService(
             CreatedBy = actor,
         };
 
-    private static string HashChecked(byte[] bytes, DocumentUpload upload)
-    {
-        var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
-        if (upload.ExpectedContentHash is { } expected && !string.Equals(expected, hash, StringComparison.OrdinalIgnoreCase))
-            throw new UserFacingException("The content does not match its digest: it was damaged on its way.");
-        return hash;
-    }
-
-    private static async Task<byte[]> ReadAllAsync(Stream content, CancellationToken cancellationToken)
-    {
-        if (content is MemoryStream existing)
-            return existing.ToArray();
-
-        using var buffer = new MemoryStream();
-        await content.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-        return buffer.ToArray();
-    }
 }
