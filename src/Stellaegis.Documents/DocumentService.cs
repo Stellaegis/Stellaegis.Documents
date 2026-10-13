@@ -29,14 +29,14 @@ internal sealed class DocumentService(
     private readonly ILogger<DocumentService> _logger = Guard.NotNull(logger);
     private readonly IEventPublisher _events = Guard.NotNull(events);
 
-    public async Task<Document> CreateAsync(string holder, string documentType, Stream content, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default)
+    public async Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(holder);
         Guard.NotWhiteSpace(documentType);
-        Guard.NotNull(content);
+        CheckUpload(upload);
         Guard.NotWhiteSpace(actor);
 
-        var bytes = await ReadAllAsync(content, cancellationToken).ConfigureAwait(false);
+        var bytes = await ReadAllAsync(upload.Content, cancellationToken).ConfigureAwait(false);
         var hash = HashHex(bytes);
         var id = Guid.NewGuid();
         var key = isVersioned ? $"{id:N}/v1" : $"{id:N}";
@@ -51,6 +51,9 @@ internal sealed class DocumentService(
             DocumentType = documentType,
             StoragePath = key,
             ContentHash = hash,
+            FileName = upload.FileName,
+            ContentType = upload.ContentType,
+            ContentLength = bytes.LongLength,
             BusinessObjectLink = businessObjectLink,
             Status = DocumentStatus.Active,
             IsVersioned = isVersioned,
@@ -58,7 +61,7 @@ internal sealed class DocumentService(
             CreatedBy = actor,
         };
         var initialVersion = isVersioned
-            ? new DocumentVersion { DocumentUniqueId = id, VersionNumber = 1, StoragePath = key, CreatedAt = now, CreatedBy = actor }
+            ? NewVersion(id, 1, key, upload, bytes.LongLength, now, actor)
             : null;
 
         await _store.CreateAsync(document, initialVersion, cancellationToken).ConfigureAwait(false);
@@ -66,17 +69,17 @@ internal sealed class DocumentService(
         return document;
     }
 
-    public async Task<Document> UpdateContentAsync(string holder, Guid documentUniqueId, Stream content, string actor, CancellationToken cancellationToken = default)
+    public async Task<Document> UpdateContentAsync(string holder, Guid documentUniqueId, DocumentUpload upload, string actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(holder);
-        Guard.NotNull(content);
+        CheckUpload(upload);
         Guard.NotWhiteSpace(actor);
 
         var current = await _store.GetAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
         if (current is null || current.Status != DocumentStatus.Active)
             throw new DocumentNotFoundException(documentUniqueId);
 
-        var bytes = await ReadAllAsync(content, cancellationToken).ConfigureAwait(false);
+        var bytes = await ReadAllAsync(upload.Content, cancellationToken).ConfigureAwait(false);
         var hash = HashHex(bytes);
         if (string.Equals(hash, current.ContentHash, StringComparison.Ordinal))
             return current; // identical content: neither overwrite nor a superfluous version
@@ -88,8 +91,8 @@ internal sealed class DocumentService(
             var key = $"{documentUniqueId:N}/v{next}";
             await WriteBlobAsync(holder, key, bytes, cancellationToken).ConfigureAwait(false);
 
-            var updated = current with { StoragePath = key, ContentHash = hash, ModifiedAt = now, ModifiedBy = actor };
-            var version = new DocumentVersion { DocumentUniqueId = documentUniqueId, VersionNumber = next, StoragePath = key, CreatedAt = now, CreatedBy = actor };
+            var updated = current with { StoragePath = key, ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
+            var version = NewVersion(documentUniqueId, next, key, upload, bytes.LongLength, now, actor);
             await _store.UpdateCurrentAsync(updated, version, cancellationToken).ConfigureAwait(false);
             await PublishIndexedAsync(updated, now, cancellationToken).ConfigureAwait(false);
             return updated;
@@ -97,7 +100,7 @@ internal sealed class DocumentService(
 
         // Non-versioned: overwrite in place at the stable key.
         await WriteBlobAsync(holder, current.StoragePath, bytes, cancellationToken).ConfigureAwait(false);
-        var overwritten = current with { ContentHash = hash, ModifiedAt = now, ModifiedBy = actor };
+        var overwritten = current with { ContentHash = hash, FileName = upload.FileName, ContentType = upload.ContentType, ContentLength = bytes.LongLength, ModifiedAt = now, ModifiedBy = actor };
         await _store.UpdateCurrentAsync(overwritten, null, cancellationToken).ConfigureAwait(false);
         await PublishIndexedAsync(overwritten, now, cancellationToken).ConfigureAwait(false);
         return overwritten;
@@ -186,6 +189,27 @@ internal sealed class DocumentService(
         => _blobStore.WriteAsync(Location(holder, key), new MemoryStream(bytes, writable: false), cancellationToken);
 
     private BlobLocation Location(string holder, string key) => new(holder, _blobSpace, key);
+
+    private static void CheckUpload(DocumentUpload upload)
+    {
+        Guard.NotNull(upload);
+        Guard.NotNull(upload.Content);
+        Guard.NotWhiteSpace(upload.FileName);
+        Guard.NotWhiteSpace(upload.ContentType);
+    }
+
+    private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, string key, DocumentUpload upload, long contentLength, DateTimeOffset now, string actor)
+        => new()
+        {
+            DocumentUniqueId = documentUniqueId,
+            VersionNumber = versionNumber,
+            StoragePath = key,
+            FileName = upload.FileName,
+            ContentType = upload.ContentType,
+            ContentLength = contentLength,
+            CreatedAt = now,
+            CreatedBy = actor,
+        };
 
     private static string HashHex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 

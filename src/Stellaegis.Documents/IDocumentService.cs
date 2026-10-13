@@ -16,14 +16,15 @@ public interface IDocumentService
     /// Stores a new document's content and indexes it. When <paramref name="isVersioned"/> is true,
     /// records it as version 1.
     /// </summary>
-    Task<Document> CreateAsync(string holder, string documentType, Stream content, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default);
+    Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, Guid? businessObjectLink = null, bool isVersioned = false, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Replaces a document's content. Identical content (same hash) is a no-op; otherwise a versioned
-    /// document gains a new revision while a non-versioned one is overwritten in place.
+    /// Replaces a document's content. Identical content (same hash) is a no-op, whatever its file name
+    /// and media type; otherwise a versioned document gains a new revision while a non-versioned one is
+    /// overwritten in place, file metadata included.
     /// </summary>
     /// <exception cref="DocumentNotFoundException">No active document with that id for the holder.</exception>
-    Task<Document> UpdateContentAsync(string holder, Guid documentUniqueId, Stream content, string actor, CancellationToken cancellationToken = default);
+    Task<Document> UpdateContentAsync(string holder, Guid documentUniqueId, DocumentUpload upload, string actor, CancellationToken cancellationToken = default);
 
     /// <summary>Opens the current content of a document.</summary>
     /// <exception cref="DocumentNotFoundException">No document with that id for the holder.</exception>
