@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -13,13 +14,14 @@ using Microsoft.Extensions.Options;
 using Stellaegis.Blobs.FileSystem;
 using Stellaegis.Documents.AspNetCore;
 using Stellaegis.Documents.Client;
+using Stellaegis.Primitives.AspNetCore;
 
 namespace Stellaegis.Documents.Tests;
 
 /// <summary>
 /// An in-memory host mapping the document API under <c>/api/t/{holder}</c>, as Stellaegis routes its tenants:
-/// reads and writes for any authenticated caller, the purge for the <c>admin</c> role, an access policy that
-/// refuses <c>mallory</c>. The caller's identity is a header, set by <see cref="Http"/> and
+/// every operation for any authenticated caller but the purge, kept for the <c>admin</c> role, and an
+/// authorization handler that refuses <c>mallory</c> every document. The caller's identity is a header, set by <see cref="Http"/> and
 /// <see cref="Client"/>.
 /// </summary>
 public sealed class DocumentsHost : IAsyncLifetime
@@ -38,24 +40,28 @@ public sealed class DocumentsHost : IAsyncLifetime
 
         builder.Services.AddStellaegisFileSystemBlobStore(o => o.RootPath = _blobRoot);
         builder.Services.AddStellaegisDocumentsInMemory(builder.Configuration);
-        builder.Services.AddSingleton<IDocumentAccessPolicy, RefuseMallory>();
+        builder.Services.AddSingleton<IAuthorizationHandler, RefuseMallory>();
         builder.Services.AddAuthentication(HeaderIdentity.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, HeaderIdentity>(HeaderIdentity.SchemeName, null);
         builder.Services.AddAuthorization(o =>
         {
-            o.AddPolicy("documents.read", p => p.RequireAuthenticatedUser());
-            o.AddPolicy("documents.write", p => p.RequireAuthenticatedUser());
-            o.AddPolicy("documents.purge", p => p.RequireClaim("role", "admin"));
+            o.AddPolicy("member", p => p.RequireAuthenticatedUser());
+            o.AddPolicy("admin", p => p.RequireClaim("role", "admin"));
         });
 
         _app = builder.Build();
         _app.UseAuthentication();
         _app.UseAuthorization();
-        var tenant = _app.MapGroup("/api/t/{holder}");
-        tenant.MapDocumentsEndpoints(http => http.GetRouteValue("holder") as string, "documents.read", "documents.write");
-        tenant.MapDocumentsPurgeEndpoint(http => http.GetRouteValue("holder") as string, "documents.purge");
+        _app.MapGroup("/api/t/{holder}")
+            .MapDocumentsEndpoints(http => http.GetRouteValue("holder") as string)
+            .RequireAuthorizationPerOperation(op => op == DocumentOperations.Purge ? "admin" : "member");
         await _app.StartAsync();
     }
+
+    /// <summary>The routes the host serves, conventions applied.</summary>
+    public IReadOnlyList<RouteEndpoint> Endpoints
+        => ((IEndpointRouteBuilder)(_app ?? throw new InvalidOperationException("The host is not started."))).DataSources
+            .SelectMany(source => source.Endpoints).OfType<RouteEndpoint>().ToList();
 
     /// <summary>An HTTP client to the host, as <paramref name="subject"/> (anonymous when null).</summary>
     public HttpClient Http(string? subject, string? role = null)
@@ -94,10 +100,14 @@ public sealed class DocumentsHost : IAsyncLifetime
             Directory.Delete(_blobRoot, recursive: true);
     }
 
-    private sealed class RefuseMallory : IDocumentAccessPolicy
+    private sealed class RefuseMallory : AuthorizationHandler<Operation, Document>
     {
-        public ValueTask<bool> IsAllowedAsync(DocumentAccessRequest request, CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(request.Actor != "mallory");
+        protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, Operation requirement, Document resource)
+        {
+            if (context.User.FindFirst("sub")?.Value != "mallory")
+                context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class HeaderIdentity(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)

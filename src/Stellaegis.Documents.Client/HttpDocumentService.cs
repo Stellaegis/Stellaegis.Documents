@@ -17,10 +17,6 @@ namespace Stellaegis.Documents.Client;
 /// sent. Authenticating the requests is the caller's concern, through the HTTP client builder.
 /// </para>
 /// <para>
-/// <see cref="TryGetContentUrlAsync"/> always returns <see langword="null"/>: the server answers a download
-/// with a redirect to a pre-signed URL when it has one, which <see cref="OpenContentAsync"/> follows.
-/// </para>
-/// <para>
 /// Answers map to the exceptions of the in-process service: 404 to <see cref="DocumentNotFoundException"/>,
 /// 400, 401, 403 and 409 to a <see cref="UserFacingException"/> of the matching <see cref="ErrorType"/>.
 /// </para>
@@ -70,9 +66,6 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
 
     public Task<Stream> OpenContentAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
         => OpenAsync(Url(Guard.NotNull(holder), $"/{documentUniqueId:N}/content"), documentUniqueId, cancellationToken);
-
-    public Task<Uri?> TryGetContentUrlAsync(string holder, Guid documentUniqueId, TimeSpan validity, CancellationToken cancellationToken = default)
-        => Task.FromResult<Uri?>(null);
 
     public Task<Stream> OpenVersionContentAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
         => OpenAsync(Url(Guard.NotNull(holder), $"/{documentUniqueId:N}/versions/{versionNumber}/content"), documentUniqueId, cancellationToken);
@@ -135,9 +128,6 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         Guard.NotWhiteSpace(holder);
 
         using var response = await _http.DeleteAsync(Url(holder, string.Empty), cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
-            throw new InvalidOperationException("The document API does not expose the purge: the host maps it only by choice (MapDocumentsPurgeEndpoint).");
-
         await EnsureSuccessAsync(response, null, cancellationToken).ConfigureAwait(false);
         return (await ReadAsync<PurgeResponse>(response, cancellationToken).ConfigureAwait(false)).Purged;
     }

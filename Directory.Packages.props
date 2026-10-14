@@ -10,9 +10,10 @@
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.10" />
     <!-- Stellaegis -->
-    <PackageVersion Include="Stellaegis.Primitives" Version="1.0.0" />
-    <PackageVersion Include="Stellaegis.Primitives.Data" Version="1.0.0" />
+    <PackageVersion Include="Stellaegis.Primitives" Version="1.1.0" />
+    <PackageVersion Include="Stellaegis.Primitives.Data" Version="1.1.0" />
     <PackageVersion Include="Stellaegis.Blobs" Version="1.0.1" />
+    <PackageVersion Include="Stellaegis.Primitives.AspNetCore" Version="1.1.0" />
     <!-- Data access -->
     <PackageVersion Include="Dapper" Version="2.1.89" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />

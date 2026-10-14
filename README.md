@@ -189,10 +189,9 @@ dotnet add package Stellaegis.Documents.AspNetCore
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGroup("/api/t/{holder}").MapDocumentsEndpoints(
-    resolveHolder: http => http.GetRouteValue("holder") as string,
-    readPolicy: "documents.read",
-    writePolicy: "documents.write");
+app.MapGroup("/api/t/{holder}")
+   .MapDocumentsEndpoints(resolveHolder: http => http.GetRouteValue("holder") as string)
+   .RequireAuthorizationPerOperation(op => op.ToString());   // "documents.read", "documents.purge"…
 ```
 
 The endpoints are mapped under `documents` on the builder you pass, so the URL prefix is yours:
@@ -201,16 +200,17 @@ The endpoints are mapped under `documents` on the builder you pass, so the URL p
 the URL is user input, this function is where your host checks that the caller has rights on that
 holder.
 
-| Request | Effect |
-| --- | --- |
-| `POST documents` | creates a document from a `multipart/form-data` body |
-| `GET documents?continuationToken=…` | one page of the holder's active documents |
-| `GET documents/{id}` | a document's metadata |
-| `PUT documents/{id}/content` | replaces its content (multipart body, `file` part only) |
-| `GET documents/{id}/content` | its current content |
-| `GET documents/{id}/versions` | its versions |
-| `GET documents/{id}/versions/{n}/content` | the content of version `n` |
-| `DELETE documents/{id}` | moves it to the trash |
+| Request | Operation | Effect |
+| --- | --- | --- |
+| `POST documents` | `create` | creates a document from a `multipart/form-data` body |
+| `GET documents?continuationToken=…` | `list` | one page of the holder's active documents |
+| `GET documents/{id}` | `read` | a document's metadata |
+| `PUT documents/{id}/content` | `replace-content` | replaces its content (multipart body, `file` part only) |
+| `GET documents/{id}/content` | `read-content` | its current content |
+| `GET documents/{id}/versions` | `list-versions` | its versions |
+| `GET documents/{id}/versions/{n}/content` | `read-version-content` | the content of version `n` |
+| `DELETE documents/{id}` | `trash` | moves it to the trash |
+| `DELETE documents` | `purge` | deletes every document of the holder for good, and answers how many |
 
 An upload is a multipart body with a `documentType` field, an optional `isVersioned` field, then a
 `file` part, which may carry a `Content-Digest` header. **The fields come before the `file` part.** The
@@ -227,24 +227,65 @@ rate limiting, forwarded headers, health checks.
 
 **Answers.** A caller without a `sub` claim (or name identifier) answers `401`; the library records it
 as the actor of every change. An absent document, a document of another holder, and a document your
-access policy refuses all answer `404`, so a caller cannot probe which documents exist. Invalid input
-answers `400` as a problem response (RFC 9457).
+authorization refuses all answer `404`, so a caller cannot probe which documents exist. Errors are
+answered as problem responses (RFC 9457) by the translation of
+[Stellaegis.Primitives.AspNetCore](https://github.com/Stellaegis/Stellaegis.Primitives): invalid input
+answers `400`, an unexpected failure `500`.
 
-**The purge** is mapped apart, only if you choose to expose it, under a policy of its own:
+### Securing the endpoints
 
-```csharp
-group.MapDocumentsPurgeEndpoint(resolveHolder, purgePolicy: "documents.purge");
-```
+The library attaches no security to its routes. Each route carries an **operation** as metadata — the
+`Operation` type of Stellaegis.Primitives.AspNetCore, with a module (`documents`), a name and a kind —
+and you decide, per operation, which policy a caller must satisfy. `DocumentOperations` lists them.
+
+`RequireAuthorizationPerOperation` receives each operation and returns the name of the policy to
+require. The operation's **name** is the key: one policy per operation, `op.ToString()` giving
+`documents.read`, `documents.purge` and so on, or any grouping of names you prefer. The **kind**
+(`Read`, `Write`, `Delete`) follows the HTTP verb and says nothing of who may perform an operation.
+
+**The purge is one route among the others**, the `purge` operation, of kind `Delete` like the trash.
+Its consequence is worth weighing before you choose your policies:
+
+- a policy chosen per operation name keeps the purge apart: `documents.purge` can require an
+  administrator while `documents.trash` requires a member;
+- a single policy on the whole group, or a policy chosen per kind, opens the purge to everyone who may
+  trash a document. Choose it knowingly, or answer `documents.purge` with a policy of its own.
+
+A route your mapping leaves without a policy falls to the fallback policy of your host, when it sets
+one.
 
 ### Per-document authorization
 
-The read and write policies decide whether a caller may use the API for a holder. `IDocumentAccessPolicy`
-decides whether a caller may reach *this* document: the endpoints consult it for every document
-access, and a refusal answers `404`. Register your own implementation, typically one that looks the
-document's GUID up in your database to check the caller's relation to the object it belongs to.
+The policies decide whether a caller may use an operation for a holder. Whether the caller may reach
+*this* document is a second question, which the endpoints ask on every document they load, items of a
+list included: they call `AuthorizeResourceAsync`, with the route's operation as the requirement and
+the `Document` as the resource. A refusal answers `404`, and a refused document is left out of a list.
 
-Without one, every caller allowed by the policies reaches every document of the holder, and the
-library logs a warning when the endpoints are mapped.
+You answer with an ordinary ASP.NET Core authorization handler, typically one that looks the document's
+GUID up in your database to check the caller's relation to the object it belongs to:
+
+```csharp
+public sealed class DocumentAuthorizationHandler : AuthorizationHandler<Operation, Document>
+{
+    protected override Task HandleRequirementAsync(
+        AuthorizationHandlerContext context, Operation operation, Document document)
+    {
+        if (/* the caller may perform operation on document */)
+            context.Succeed(operation);
+        return Task.CompletedTask;
+    }
+}
+
+builder.Services.AddSingleton<IAuthorizationHandler, DocumentAuthorizationHandler>();
+```
+
+**Refusal is the default.** Without a handler, every document is refused. A host in which every caller
+allowed by the policies may reach every document of the holder declares it on the group, as it would
+declare `[AllowAnonymous]`:
+
+```csharp
+app.MapGroup("/api/t/{holder}").MapDocumentsEndpoints(resolveHolder).AllowAnyResource();
+```
 
 ### Reaching the endpoints from another process
 
@@ -267,12 +308,10 @@ unchanged. `holderPath` gives the path under which the host maps a holder's endp
 holder is not part of the URL. The client sends requests as they are: add a handler to the returned
 builder to attach your token.
 
-Three differences with the in-process service follow from the protocol:
+Two differences with the in-process service follow from the protocol:
 
 - the server records the authenticated caller as the actor of a change, so the `actor` argument is not
   sent;
-- `TryGetContentUrlAsync` returns `null`, since a download already follows the server's redirect to a
-  pre-signed URL when the blob store offers one;
 - the client checks a downloaded content against its `Repr-Digest` as you read it, and throws
   `InvalidDataException` at the end of a content damaged on its way. It sends the digest of an upload
   when you supply it or when the stream can be read twice; a forward-only stream goes unchecked rather
@@ -316,9 +355,6 @@ until every row that uses it has been rewritten.
 - **Concurrent changes of one document.** Two changes of the same document at the same moment compute
   the same content number; the store refuses the second, but its content has already replaced the
   first one's in the blob store. Serialize changes to a document if they can collide.
-- **Pre-signed URLs carry no file name.** When a blob store offers pre-signed URLs, the browser saves
-  the content under its storage key rather than its file name. The filesystem adapter does not
-  pre-sign, so it is not affected.
 - **No resumable upload.** An interrupted upload starts over; downloads resume.
 - **No grouping of operations.** Each operation stands alone: creating a document and attaching it to
   your object are two steps, and a document stays unattached if the second fails. Clean such

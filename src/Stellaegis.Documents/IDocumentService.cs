@@ -32,15 +32,6 @@ public interface IDocumentService
     /// <exception cref="DocumentNotFoundException">No document with that id for the holder.</exception>
     Task<Stream> OpenContentAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Tries to obtain a short-lived direct download URL for a document's current content, letting the
-    /// browser fetch bytes straight from the storage backend. Returns <see langword="null"/> when the
-    /// backend cannot pre-sign (e.g. the filesystem adapter) — the caller must then stream via
-    /// <see cref="OpenContentAsync"/>.
-    /// </summary>
-    /// <exception cref="DocumentNotFoundException">No document with that id for the holder.</exception>
-    Task<Uri?> TryGetContentUrlAsync(string holder, Guid documentUniqueId, TimeSpan validity, CancellationToken cancellationToken = default);
-
     /// <summary>Opens the content of a specific version.</summary>
     /// <exception cref="DocumentNotFoundException">No such document or version for the holder.</exception>
     Task<Stream> OpenVersionContentAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default);

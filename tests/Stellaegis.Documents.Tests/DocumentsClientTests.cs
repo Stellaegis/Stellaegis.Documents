@@ -99,10 +99,4 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         Assert.Equal(ErrorType.Forbidden, refused.Type);
         Assert.Equal(2, await host.Client("ops", "admin").PurgeHolderAsync(holder, Ct));
     }
-
-    [Fact]
-    public async Task The_client_offers_no_pre_signed_url()
-    {
-        Assert.Null(await host.Client("alice").TryGetContentUrlAsync(NewHolder(), Guid.NewGuid(), TimeSpan.FromMinutes(1), Ct));
-    }
 }

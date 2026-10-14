@@ -135,13 +135,6 @@ internal sealed class DocumentService(
         return await OpenBlobAsync(documentUniqueId, Location(holder, documentUniqueId, document.VersionNumber), cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<Uri?> TryGetContentUrlAsync(string holder, Guid documentUniqueId, TimeSpan validity, CancellationToken cancellationToken = default)
-    {
-        var document = await RequireAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
-        return await _blobStore.TryGetDownloadUrlAsync(
-            Location(holder, documentUniqueId, document.VersionNumber), validity, cancellationToken).ConfigureAwait(false);
-    }
-
     public async Task<Stream> OpenVersionContentAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(holder);

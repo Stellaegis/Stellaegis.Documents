@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using Stellaegis.Documents.AspNetCore;
+using Stellaegis.Primitives.AspNetCore;
 using static Stellaegis.Documents.Tests.Content;
 
 namespace Stellaegis.Documents.Tests;
@@ -163,6 +165,29 @@ public sealed class DocumentsApiTests(DocumentsHost host) : IClassFixture<Docume
         var second = (await http.GetFromJsonAsync<DocumentPageResponse>($"/api/t/{holder}/documents?continuationToken={Uri.EscapeDataString(first.ContinuationToken)}", Ct))!;
 
         Assert.Equal(ids.Skip(1).Reverse(), first.Documents.Concat(second.Documents).Select(d => d.DocumentUniqueId));
+    }
+
+    [Fact]
+    public async Task The_list_leaves_out_the_documents_the_host_refuses()
+    {
+        var (holder, document) = await CreateAsync(host.Http("alice"));
+
+        var seen = (await host.Http("bob").GetFromJsonAsync<DocumentPageResponse>($"/api/t/{holder}/documents", Ct))!;
+        var refused = (await host.Http("mallory").GetFromJsonAsync<DocumentPageResponse>($"/api/t/{holder}/documents", Ct))!;
+
+        Assert.Equal([document.DocumentUniqueId], seen.Documents.Select(d => d.DocumentUniqueId));
+        Assert.Empty(refused.Documents);
+    }
+
+    [Fact]
+    public void Every_route_carries_an_operation_of_its_own()
+    {
+        var operations = host.Endpoints.Select(e => e.GetOperation()).ToList();
+
+        Assert.Equal(9, operations.Count);
+        Assert.DoesNotContain(null, operations);
+        Assert.Equal(operations.Count, operations.Distinct().Count());
+        Assert.All(operations, op => Assert.Equal(DocumentOperations.Module, op!.Module));
     }
 
     [Fact]

@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Each route carries an operation (`DocumentOperations`, on the `Operation` type of
+  Stellaegis.Primitives.AspNetCore 1.1.0), and the host attaches its policies to the returned group,
+  per operation (`RequireAuthorizationPerOperation`). `MapDocumentsEndpoints` no longer takes
+  `readPolicy` and `writePolicy`.
+- The purge is mapped with the other routes, as the `purge` operation. `MapDocumentsPurgeEndpoint` is
+  removed: the purge is exposed wherever the endpoints are, and secured like any other operation.
+- Access to each loaded document is asked through ASP.NET Core resource authorization
+  (`AuthorizeResourceAsync`), refusal by default. A host answers it with an
+  `AuthorizationHandler<Operation, Document>`, or declares `AllowAnyResource()`.
+- Errors are translated by Stellaegis.Primitives.AspNetCore: an unexpected failure answers `500`
+  instead of `422`, and the error code travels in the `code` extension of the problem details.
+
+### Removed
+
+- `IDocumentAccessPolicy`, `AllowAllDocumentAccessPolicy`, `DocumentAccessRequest` and
+  `DocumentAction`, replaced by resource authorization.
+- `IDocumentService.TryGetContentUrlAsync`, and the redirect of `GET documents/{id}/content` to a
+  pre-signed URL: content is always streamed by the endpoints.
+
 ## [1.0.0] — 2026-10-13
 
 First release as a standalone library.
