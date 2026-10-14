@@ -79,17 +79,22 @@ public sealed class DocumentsHost : IAsyncLifetime
     }
 
     /// <summary>
-    /// The document client as <paramref name="subject"/>, its requests carried to the host. With
+    /// The document client as <paramref name="subject"/>, its requests carried to the host, configured with the
+    /// URL of the compartments and the URL of the shared space unless told otherwise. With
     /// <paramref name="damage"/>, the first byte of every downloaded content is flipped on its way.
     /// </summary>
-    public IDocumentService Client(string subject, string? role = null, bool damage = false)
+    public IDocumentService Client(string subject, string? role = null, bool damage = false, bool compartments = true, bool shared = true)
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection([KeyValuePair.Create<string, string?>("Stellaegis:Documents:Client:BaseUrl", "http://localhost/api/")])
+            .AddInMemoryCollection(
+            [
+                KeyValuePair.Create("Stellaegis:Documents:Client:CompartmentUrl", compartments ? "http://localhost/api/t/{compartment}" : null),
+                KeyValuePair.Create("Stellaegis:Documents:Client:SharedUrl", shared ? "http://localhost/api/shared/" : null),
+            ])
             .Build();
 
         var services = new ServiceCollection();
-        services.AddStellaegisDocumentsClient(configuration, compartment => $"t/{compartment}/")
+        services.AddStellaegisDocumentsClient(configuration)
             .ConfigurePrimaryHttpMessageHandler(() => Server.CreateHandler())
             .AddHttpMessageHandler(() => new Identity(subject, role))
             .AddHttpMessageHandler(() => new Damage(damage));

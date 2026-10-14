@@ -102,4 +102,36 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         Assert.Equal(ErrorType.Forbidden, refused.Type);
         Assert.Equal(2, await host.Client("ops", "admin").PurgeCompartmentAsync(compartment, Ct));
     }
+
+    [Fact]
+    public async Task The_shared_space_goes_to_its_own_url()
+    {
+        var documents = host.Client("alice");
+        var compartment = NewCompartment();
+
+        var shared = await documents.CreateAsync(Space.Shared, "logo", Upload("svg"), Ignored, cancellationToken: Ct);
+        var owned = await documents.CreateAsync(compartment, "invoice", Upload("hello"), Ignored, cancellationToken: Ct);
+
+        Assert.Equal(Space.Shared, shared.Space);
+        Assert.Equal("svg", await ReadAsync(await documents.OpenContentAsync(Space.Shared, shared.DocumentUniqueId, Ct)));
+        Assert.Null(await documents.GetAsync(compartment, shared.DocumentUniqueId, Ct));
+        Assert.Null(await documents.GetAsync(Space.Shared, owned.DocumentUniqueId, Ct));
+    }
+
+    [Fact]
+    public async Task A_space_whose_url_is_not_configured_is_refused_without_falling_back()
+    {
+        var withoutShared = host.Client("alice", shared: false);
+        var withoutCompartments = host.Client("alice", compartments: false);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => withoutShared.ListAsync(Space.Shared, cancellationToken: Ct));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => withoutCompartments.ListAsync(NewCompartment(), cancellationToken: Ct));
+        Assert.Empty((await withoutShared.ListAsync(NewCompartment(), cancellationToken: Ct)).Documents);
+    }
+
+    [Fact]
+    public void A_client_without_any_url_fails_when_resolved()
+    {
+        Assert.Throws<InvalidOperationException>(() => host.Client("alice", compartments: false, shared: false));
+    }
 }

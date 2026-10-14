@@ -20,45 +20,37 @@ public static class ServiceCollectionExtensions
     /// requires.
     /// </remarks>
     /// <example>
-    /// appsettings.json:
+    /// appsettings.json, for a host that maps the endpoints under <c>orgs/{org}</c> and <c>shared</c>:
     /// <code>
     /// "Stellaegis": {
     ///   "Documents": {
-    ///     "Client": { "BaseUrl": "https://documents.example.com/api/" }
+    ///     "Client": {
+    ///       "CompartmentUrl": "https://documents.example.com/api/orgs/{compartment}/",
+    ///       "SharedUrl": "https://documents.example.com/api/shared/"
+    ///     }
     ///   }
     /// }
     /// </code>
-    /// Program.cs, for a host that maps the endpoints under <c>t/{tenantSlug}</c>:
+    /// Program.cs:
     /// <code>
-    /// builder.Services.AddStellaegisDocumentsClient(builder.Configuration, holder => $"t/{holder}/")
+    /// builder.Services.AddStellaegisDocumentsClient(builder.Configuration)
     ///     .AddHttpMessageHandler&lt;MyTokenHandler&gt;();
     /// </code>
     /// </example>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The configuration holding <paramref name="sectionName"/>.</param>
-    /// <param name="holderPath">
-    /// Gives the path of a holder's endpoints, relative to the base URL. Omitted, the holder is not part of
-    /// the URL: the host resolves it some other way, or does not isolate.
-    /// </param>
     /// <param name="sectionName">The configuration section of the client options.</param>
     /// <returns>The builder of the underlying HTTP client, to add handlers to.</returns>
     public static IHttpClientBuilder AddStellaegisDocumentsClient(
         this IServiceCollection services,
         IConfiguration configuration,
-        Func<string, string>? holderPath = null,
         string sectionName = DocumentsClientOptions.SectionName)
     {
         Guard.NotNull(configuration);
         Guard.NotWhiteSpace(sectionName);
 
         services.Configure<DocumentsClientOptions>(configuration.GetSection(sectionName));
-        services.AddSingleton(holderPath is null ? DocumentsHolderPath.None : new DocumentsHolderPath(holderPath));
-
         return services.AddHttpClient<IDocumentService, HttpDocumentService>((sp, http) =>
-        {
-            var options = sp.GetRequiredService<IOptions<DocumentsClientOptions>>().Value;
-            http.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
-            http.Timeout = options.Timeout;
-        });
+            http.Timeout = sp.GetRequiredService<IOptions<DocumentsClientOptions>>().Value.Timeout);
     }
 }

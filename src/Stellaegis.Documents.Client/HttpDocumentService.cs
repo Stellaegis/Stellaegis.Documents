@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Stellaegis.Primitives;
 
 namespace Stellaegis.Documents.Client;
@@ -12,6 +13,11 @@ namespace Stellaegis.Documents.Client;
 /// that a consumer works the same in process or remotely.
 /// </summary>
 /// <remarks>
+/// <para>
+/// A call in a compartment goes to <see cref="DocumentsClientOptions.CompartmentUrl"/>, a call in the shared
+/// space to <see cref="DocumentsClientOptions.SharedUrl"/>; a call whose URL is not configured throws an
+/// <see cref="InvalidOperationException"/>, and never goes to the other one.
+/// </para>
 /// <para>
 /// The server records the authenticated caller as the actor of a change: the <c>actor</c> argument is not
 /// sent. Authenticating the requests is the caller's concern, through the HTTP client builder.
@@ -28,10 +34,24 @@ namespace Stellaegis.Documents.Client;
 /// <see cref="InvalidDataException"/> when the content was damaged on its way.
 /// </para>
 /// </remarks>
-internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath holderPath) : IDocumentService
+internal sealed class HttpDocumentService : IDocumentService
 {
-    private readonly HttpClient _http = Guard.NotNull(http);
-    private readonly DocumentsHolderPath _holderPath = Guard.NotNull(holderPath);
+    private readonly HttpClient _http;
+    private readonly string? _compartmentUrl;
+    private readonly string? _sharedUrl;
+
+    /// <summary>Creates the client, validating the URLs it is configured with.</summary>
+    public HttpDocumentService(HttpClient http, IOptions<DocumentsClientOptions> options)
+    {
+        _http = Guard.NotNull(http);
+        var value = Guard.NotNull(options).Value;
+        _compartmentUrl = Absolute(value.CompartmentUrl, nameof(DocumentsClientOptions.CompartmentUrl));
+        _sharedUrl = Absolute(value.SharedUrl, nameof(DocumentsClientOptions.SharedUrl));
+        if (_compartmentUrl is null && _sharedUrl is null)
+            throw new InvalidOperationException(
+                $"{DocumentsClientOptions.SectionName}: {nameof(DocumentsClientOptions.CompartmentUrl)} or " +
+                $"{nameof(DocumentsClientOptions.SharedUrl)} is required.");
+    }
 
     public async Task<Document> CreateAsync(Space space, string documentType, DocumentUpload upload, Actor actor, bool isVersioned = false, CancellationToken cancellationToken = default)
     {
@@ -153,9 +173,30 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
     }
 
     private string Url(Space space, string rest)
-        => space.Compartment is { } compartment
-            ? $"{_holderPath.For(compartment.Value)}documents{rest}"
-            : throw new InvalidOperationException("This client has no URL for the shared space.");
+    {
+        if (space.Compartment is not { } compartment)
+            return (_sharedUrl ?? throw NotConfigured(nameof(DocumentsClientOptions.SharedUrl), "the shared space")) + "documents" + rest;
+
+        var url = _compartmentUrl ?? throw NotConfigured(nameof(DocumentsClientOptions.CompartmentUrl), "a compartment");
+        return url.Replace(DocumentsClientOptions.CompartmentPlaceholder, compartment.Value, StringComparison.Ordinal) + "documents" + rest;
+    }
+
+    private static InvalidOperationException NotConfigured(string option, string target)
+        => new($"{DocumentsClientOptions.SectionName}:{option} is not configured: this client reaches no document in {target}.");
+
+    // A URL ends with '/' so that "documents" extends its path. A compartment, when the placeholder is replaced,
+    // is a valid path segment by its grammar.
+    private static string? Absolute(string? url, string option)
+    {
+        if (url is null)
+            return null;
+
+        var sample = url.Replace(DocumentsClientOptions.CompartmentPlaceholder, "compartment", StringComparison.Ordinal);
+        if (!Uri.TryCreate(sample, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            throw new InvalidOperationException($"{DocumentsClientOptions.SectionName}:{option} must be an absolute HTTP URL.");
+
+        return url.EndsWith('/') ? url : url + "/";
+    }
 
     private static void AddFile(MultipartFormDataContent form, DocumentUpload upload)
     {
