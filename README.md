@@ -364,7 +364,7 @@ until every row that uses it has been rewritten.
 ## Building and testing
 
 ```sh
-dotnet test Stellaegis.Documents.slnx
+dotnet test --solution Stellaegis.Documents.slnx
 ```
 
 The PostgreSQL tests use a database of their own, `stellaegis_documents_tests` on a local server as

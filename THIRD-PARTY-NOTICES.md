@@ -17,5 +17,5 @@ alongside them, each under its own license.
 The PostgreSQL store relies on the `pgcrypto` extension, part of PostgreSQL itself (PostgreSQL
 License), which the schema script enables.
 
-Test-only dependencies (xUnit, Microsoft.NET.Test.Sdk, ASP.NET Core TestHost, Stellaegis.Blobs.FileSystem)
+Test-only dependencies (xUnit, ASP.NET Core TestHost, Stellaegis.Blobs.FileSystem)
 are not part of any package and are not listed here.
