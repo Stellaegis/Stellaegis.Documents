@@ -48,21 +48,21 @@ internal sealed class DocumentService(
         $"{nameof(DocumentsOptions)}.{nameof(DocumentsOptions.ListPageSize)} must be between 1 and 1000.");
     private readonly IEventPublisher _events = Guard.NotNull(events);
 
-    public async Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, bool isVersioned = false, CancellationToken cancellationToken = default)
+    public async Task<Document> CreateAsync(Space space, string documentType, DocumentUpload upload, Actor actor, bool isVersioned = false, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
         Guard.NotWhiteSpace(documentType);
         CheckUpload(upload);
-        Guard.NotWhiteSpace(actor);
+        Guard.NotNull(actor);
 
         var id = Guid.NewGuid();
-        var (hash, length) = await WriteCheckedAsync(holder, id, 1, upload, cancellationToken).ConfigureAwait(false);
+        var (hash, length) = await WriteCheckedAsync(space, id, 1, upload, cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
         var document = new Document
         {
             DocumentUniqueId = id,
-            Holder = holder,
+            Space = space,
             DocumentType = documentType,
             VersionNumber = 1,
             ContentHash = hash,
@@ -83,13 +83,13 @@ internal sealed class DocumentService(
         return document;
     }
 
-    public async Task<Document> UpdateContentAsync(string holder, Guid documentUniqueId, DocumentUpload upload, string actor, CancellationToken cancellationToken = default)
+    public async Task<Document> UpdateContentAsync(Space space, Guid documentUniqueId, DocumentUpload upload, Actor actor, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
         CheckUpload(upload);
-        Guard.NotWhiteSpace(actor);
+        Guard.NotNull(actor);
 
-        var current = await _store.GetAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
+        var current = await _store.GetAsync(space, documentUniqueId, cancellationToken).ConfigureAwait(false);
         if (current is null || current.Status != DocumentStatus.Active)
             throw new DocumentNotFoundException(documentUniqueId);
 
@@ -100,11 +100,11 @@ internal sealed class DocumentService(
         // Known limit: two concurrent updates compute the same number. The store refuses the second
         // revision, but its content has already replaced the first one's under the shared key.
         var next = current.VersionNumber + 1;
-        var (hash, length) = await WriteCheckedAsync(holder, documentUniqueId, next, upload, cancellationToken).ConfigureAwait(false);
+        var (hash, length) = await WriteCheckedAsync(space, documentUniqueId, next, upload, cancellationToken).ConfigureAwait(false);
         if (string.Equals(hash, current.ContentHash, StringComparison.Ordinal))
         {
             // Identical content: neither a change nor a superfluous version.
-            await DeleteBlobAsync(holder, documentUniqueId, next, cancellationToken).ConfigureAwait(false);
+            await DeleteBlobAsync(space, documentUniqueId, next, cancellationToken).ConfigureAwait(false);
             return current;
         }
 
@@ -117,43 +117,43 @@ internal sealed class DocumentService(
         }
         catch
         {
-            await DeleteBlobAsync(holder, documentUniqueId, next, CancellationToken.None).ConfigureAwait(false);
+            await DeleteBlobAsync(space, documentUniqueId, next, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
 
         // Without history, the former content goes once nothing points to it any more.
         if (!current.IsVersioned)
-            await DeleteBlobAsync(holder, documentUniqueId, current.VersionNumber, CancellationToken.None).ConfigureAwait(false);
+            await DeleteBlobAsync(space, documentUniqueId, current.VersionNumber, CancellationToken.None).ConfigureAwait(false);
 
         await PublishIndexedAsync(updated, now, cancellationToken).ConfigureAwait(false);
         return updated;
     }
 
-    public async Task<Stream> OpenContentAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<Stream> OpenContentAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        var document = await RequireAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
-        return await OpenBlobAsync(documentUniqueId, Location(holder, documentUniqueId, document.VersionNumber), cancellationToken).ConfigureAwait(false);
+        var document = await RequireAsync(space, documentUniqueId, cancellationToken).ConfigureAwait(false);
+        return await OpenBlobAsync(documentUniqueId, Location(space, documentUniqueId, document.VersionNumber), cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<Stream> OpenVersionContentAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
+    public async Task<Stream> OpenVersionContentAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
 
-        _ = await _store.GetVersionAsync(holder, documentUniqueId, versionNumber, cancellationToken).ConfigureAwait(false)
+        _ = await _store.GetVersionAsync(space, documentUniqueId, versionNumber, cancellationToken).ConfigureAwait(false)
             ?? throw new DocumentNotFoundException(documentUniqueId);
-        return await OpenBlobAsync(documentUniqueId, Location(holder, documentUniqueId, versionNumber), cancellationToken).ConfigureAwait(false);
+        return await OpenBlobAsync(documentUniqueId, Location(space, documentUniqueId, versionNumber), cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
-        => _store.GetAsync(Guard.NotNull(holder), documentUniqueId, cancellationToken);
+    public Task<Document?> GetAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+        => _store.GetAsync(Guard.NotNull(space), documentUniqueId, cancellationToken);
 
-    public async Task<DocumentPage> ListAsync(string holder, string? continuationToken = null, CancellationToken cancellationToken = default)
+    public async Task<DocumentPage> ListAsync(Space space, string? continuationToken = null, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
         var after = continuationToken is null ? null : DecodeCursor(continuationToken);
 
         // One more than a page tells whether a next page exists without a second query.
-        var documents = await _store.ListAsync(holder, after, _listPageSize + 1, cancellationToken).ConfigureAwait(false);
+        var documents = await _store.ListAsync(space, after, _listPageSize + 1, cancellationToken).ConfigureAwait(false);
         if (documents.Count <= _listPageSize)
             return new DocumentPage(documents, null);
 
@@ -162,27 +162,27 @@ internal sealed class DocumentService(
         return new DocumentPage(page, EncodeCursor(new DocumentCursor(last.CreatedAt, last.DocumentUniqueId)));
     }
 
-    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        await RequireAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
-        return await _store.GetVersionsAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
+        await RequireAsync(space, documentUniqueId, cancellationToken).ConfigureAwait(false);
+        return await _store.GetVersionsAsync(space, documentUniqueId, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task TrashAsync(string holder, Guid documentUniqueId, string actor, CancellationToken cancellationToken = default)
+    public async Task TrashAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
-        Guard.NotWhiteSpace(actor);
-        await RequireAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false);
+        Guard.NotNull(actor);
+        await RequireAsync(space, documentUniqueId, cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
-        await _store.SetStatusAsync(holder, documentUniqueId, DocumentStatus.Trashed, actor, now, cancellationToken).ConfigureAwait(false);
+        await _store.SetStatusAsync(space, documentUniqueId, DocumentStatus.Trashed, actor, now, cancellationToken).ConfigureAwait(false);
         await _events.PublishAsync(
-            new DocumentTrashedEvent { OccurredAt = now, Holder = holder, DocumentUniqueId = documentUniqueId },
+            new DocumentTrashedEvent { OccurredAt = now, Compartment = space.Compartment, IsShared = space.IsShared, DocumentUniqueId = documentUniqueId },
             cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<int> PurgeHolderAsync(string holder, CancellationToken cancellationToken = default)
+    public async Task<int> PurgeCompartmentAsync(Compartment compartment, CancellationToken cancellationToken = default)
     {
-        Guard.NotWhiteSpace(holder);
+        Space space = Guard.NotNull(compartment);
 
         // Batches keep memory bounded. Deleted documents leave the next query, so no position is kept:
         // the purge takes what remains until nothing does.
@@ -190,7 +190,7 @@ internal sealed class DocumentService(
         IReadOnlyList<Document> batch;
         do
         {
-            batch = await _store.ListAnyStatusAsync(holder, PurgeBatchSize, cancellationToken).ConfigureAwait(false);
+            batch = await _store.ListAnyStatusAsync(space, PurgeBatchSize, cancellationToken).ConfigureAwait(false);
             foreach (var document in batch)
             {
                 if (!purged.Add(document.DocumentUniqueId))
@@ -199,14 +199,14 @@ internal sealed class DocumentService(
                 // Content first: a purge cut between the two leaves metadata that the next call finds and
                 // completes, never content that nothing points to any more.
                 for (var version = 1; version <= document.VersionNumber; version++)
-                    await _blobStore.DeleteAsync(Location(holder, document.DocumentUniqueId, version), cancellationToken).ConfigureAwait(false);
+                    await _blobStore.DeleteAsync(Location(space, document.DocumentUniqueId, version), cancellationToken).ConfigureAwait(false);
 
-                await _store.DeleteAsync(holder, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
+                await _store.DeleteAsync(space, document.DocumentUniqueId, cancellationToken).ConfigureAwait(false);
             }
         }
         while (batch.Count == PurgeBatchSize);
 
-        _logger.LogInformation("Purged {DocumentCount} documents of holder {Holder}.", purged.Count, holder);
+        _logger.LogInformation("Purged {DocumentCount} documents of compartment {Compartment}.", purged.Count, compartment);
         return purged.Count;
     }
 
@@ -215,7 +215,8 @@ internal sealed class DocumentService(
             new DocumentIndexedEvent
             {
                 OccurredAt = occurredAt,
-                Holder = document.Holder,
+                Compartment = document.Space.Compartment,
+                IsShared = document.Space.IsShared,
                 DocumentUniqueId = document.DocumentUniqueId,
                 DocumentType = document.DocumentType,
                 ContentHash = document.ContentHash,
@@ -223,10 +224,10 @@ internal sealed class DocumentService(
             },
             cancellationToken);
 
-    private async Task<Document> RequireAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken)
+    private async Task<Document> RequireAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken)
     {
-        Guard.NotNull(holder);
-        return await _store.GetAsync(holder, documentUniqueId, cancellationToken).ConfigureAwait(false)
+        Guard.NotNull(space);
+        return await _store.GetAsync(space, documentUniqueId, cancellationToken).ConfigureAwait(false)
             ?? throw new DocumentNotFoundException(documentUniqueId);
     }
 
@@ -245,29 +246,32 @@ internal sealed class DocumentService(
     // Streams the content to its blob while hashing it, then checks it against the sender's digest: content
     // that does not match is deleted before anything points to it.
     private async Task<(string Hash, long Length)> WriteCheckedAsync(
-        string holder, Guid documentUniqueId, int versionNumber, DocumentUpload upload, CancellationToken cancellationToken)
+        Space space, Guid documentUniqueId, int versionNumber, DocumentUpload upload, CancellationToken cancellationToken)
     {
         using var hashing = new HashingStream(upload.Content);
-        await _blobStore.WriteAsync(Location(holder, documentUniqueId, versionNumber), hashing, cancellationToken).ConfigureAwait(false);
+        await _blobStore.WriteAsync(Location(space, documentUniqueId, versionNumber), hashing, cancellationToken).ConfigureAwait(false);
 
         var hash = hashing.ContentHash;
         if (upload.ExpectedContentHash is { } expected && !string.Equals(expected, hash, StringComparison.OrdinalIgnoreCase))
         {
-            await DeleteBlobAsync(holder, documentUniqueId, versionNumber, CancellationToken.None).ConfigureAwait(false);
+            await DeleteBlobAsync(space, documentUniqueId, versionNumber, CancellationToken.None).ConfigureAwait(false);
             throw new UserFacingException("The content does not match its digest: it was damaged on its way.");
         }
 
         return (hash, hashing.ContentLength);
     }
 
-    private Task DeleteBlobAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken)
-        => _blobStore.DeleteAsync(Location(holder, documentUniqueId, versionNumber), cancellationToken);
+    private Task DeleteBlobAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken)
+        => _blobStore.DeleteAsync(Location(space, documentUniqueId, versionNumber), cancellationToken);
 
-    private BlobLocation Location(string holder, Guid documentUniqueId, int versionNumber)
-        => new(holder, _blobSpace, $"{documentUniqueId:N}-{versionNumber}");
+    private BlobLocation Location(Space space, Guid documentUniqueId, int versionNumber)
+    {
+        var key = $"{documentUniqueId:N}-{versionNumber}";
+        return space.IsShared ? BlobLocation.Shared(_blobSpace, key) : new BlobLocation(space.Compartment, _blobSpace, key);
+    }
 
-    // A token only positions a list the store already scopes to the holder: altering it moves the page,
-    // it never reaches another holder's documents.
+    // A token only positions a list the store already scopes to the space: altering it moves the page,
+    // it never reaches another space's documents.
     private static string EncodeCursor(DocumentCursor cursor)
     {
         var bytes = new byte[24];
@@ -312,7 +316,7 @@ internal sealed class DocumentService(
             $"A media type has at most {DocumentUpload.MaxContentTypeLength} characters.");
     }
 
-    private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, DocumentUpload upload, long contentLength, string contentHash, DateTimeOffset now, string actor)
+    private static DocumentVersion NewVersion(Guid documentUniqueId, int versionNumber, DocumentUpload upload, long contentLength, string contentHash, DateTimeOffset now, Actor actor)
         => new()
         {
             DocumentUniqueId = documentUniqueId,

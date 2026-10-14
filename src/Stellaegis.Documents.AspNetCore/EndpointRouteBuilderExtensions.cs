@@ -19,7 +19,7 @@ namespace Stellaegis.Documents.AspNetCore;
 /// <list type="bullet">
 ///   <item><c>POST documents</c> (<c>create</c>) — create a document from a <c>multipart/form-data</c> request:
 ///   a <c>documentType</c> field, an optional <c>isVersioned</c> field, then a <c>file</c> part</item>
-///   <item><c>GET documents?continuationToken=…</c> (<c>list</c>) — one page of the holder's active documents</item>
+///   <item><c>GET documents?continuationToken=…</c> (<c>list</c>) — one page of the active documents of the space</item>
 ///   <item><c>GET documents/{id}</c> (<c>read</c>) — a document's metadata</item>
 ///   <item><c>PUT documents/{id}/content</c> (<c>replace-content</c>) — replace its content (same multipart
 ///   form, <c>file</c> only)</item>
@@ -27,8 +27,8 @@ namespace Stellaegis.Documents.AspNetCore;
 ///   <item><c>GET documents/{id}/versions</c> (<c>list-versions</c>) and
 ///   <c>GET documents/{id}/versions/{n}/content</c> (<c>read-version-content</c>) — its history</item>
 ///   <item><c>DELETE documents/{id}</c> (<c>trash</c>) — move it to the trash</item>
-///   <item><c>DELETE documents</c> (<c>purge</c>) — delete every document of the holder for good
-///   (<see cref="IDocumentService.PurgeHolderAsync"/>), answering how many were deleted</item>
+///   <item><c>DELETE documents</c> (<c>purge</c>) — delete every document of the compartment for good
+///   (<see cref="IDocumentService.PurgeCompartmentAsync"/>), answering how many were deleted</item>
 ///   <item>a streamed content carries its SHA-256 as <c>Repr-Digest</c> (RFC 9530) and as a strong <c>ETag</c>,
 ///   and answers <c>Range</c> requests, so an interrupted download resumes; the <c>file</c> part of an upload
 ///   may carry a <c>Content-Digest</c>, and content that does not match it is refused with <c>400</c></item>
@@ -44,10 +44,10 @@ namespace Stellaegis.Documents.AspNetCore;
 /// either, every document is refused. A refusal on a document answers <c>404</c>, like an absent one.
 /// </para>
 /// <para>
-/// The host decides who the holder of each request is: <c>resolveHolder</c> reads it from the request — a
-/// route value, a claim, a constant — once the host has checked the caller's rights on it, since a holder
-/// read from the URL is user input. A <see langword="null"/> holder answers <c>404</c>. The actor recorded on
-/// each change is the caller's <c>sub</c> claim (or name identifier); without one, the call answers
+/// The host decides the space of each request: <c>resolveSpace</c> reads it from the request — a route
+/// value, a claim, a constant — once the host has checked the caller's rights on it, since a compartment
+/// read from the URL is user input. A <see langword="null"/> space answers <c>404</c>. The actor recorded on
+/// each change is the caller's <c>sub</c> claim (or name identifier); without a valid one, the call answers
 /// <c>401</c>. Errors are answered as problem details by the translation of
 /// <c>Stellaegis.Primitives.AspNetCore</c>.
 /// </para>
@@ -67,8 +67,8 @@ namespace Stellaegis.Documents.AspNetCore;
 /// var app = builder.Build();
 /// app.UseAuthentication();
 /// app.UseAuthorization();
-/// app.MapGroup("/h/{holder}")
-///    .MapDocumentsEndpoints(http => http.GetRouteValue("holder") as string)
+/// app.MapGroup("/c/{compartment}")
+///    .MapDocumentsEndpoints(http => Compartment.TryParse(http.GetRouteValue("compartment") as string, out var c) ? c : null)
 ///    .RequireAuthorizationPerOperation(op => op.ToString());   // "documents.read", "documents.purge"…
 /// </code>
 /// </example>
@@ -79,21 +79,21 @@ public static class EndpointRouteBuilderExtensions
     /// and none secured: the host attaches its security to the returned group.
     /// </summary>
     /// <param name="endpoints">The builder to map the endpoints on — the application, or a route group.</param>
-    /// <param name="resolveHolder">Gives the holder of a request, or <see langword="null"/> to answer 404.</param>
+    /// <param name="resolveSpace">Gives the space of a request, or <see langword="null"/> to answer 404.</param>
     /// <returns>The group holding the endpoints, for the host's security and further conventions.</returns>
     public static RouteGroupBuilder MapDocumentsEndpoints(
         this IEndpointRouteBuilder endpoints,
-        Func<HttpContext, string?> resolveHolder)
+        Func<HttpContext, Space?> resolveSpace)
     {
         Guard.NotNull(endpoints);
-        Guard.NotNull(resolveHolder);
+        Guard.NotNull(resolveSpace);
 
         var group = endpoints.MapGroup("documents");
         group.AddErrorTranslation();
 
         group.MapPost("/", async (HttpContext http, IDocumentService documents, CancellationToken ct) =>
             {
-                if (Caller(http, resolveHolder) is not { } caller)
+                if (Caller(http, resolveSpace) is not { } caller)
                     return Refusal(http);
 
                 return await WithUploadAsync(http, async (fields, upload) =>
@@ -101,7 +101,7 @@ public static class EndpointRouteBuilderExtensions
                     if (string.IsNullOrWhiteSpace(fields.DocumentType))
                         return BadRequest("A 'documentType' field is required, before the 'file' part.");
 
-                    var document = await documents.CreateAsync(caller.Holder, fields.DocumentType, upload, caller.Actor, fields.IsVersioned, ct);
+                    var document = await documents.CreateAsync(caller.Space, fields.DocumentType, upload, caller.Actor, fields.IsVersioned, ct);
                     return Results.Created($"{http.Request.PathBase}{http.Request.Path.Value?.TrimEnd('/')}/{document.DocumentUniqueId:N}", DocumentResponse.From(document));
                 }, ct);
             })
@@ -112,12 +112,12 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapGet("/", async (HttpContext http, string? continuationToken, IDocumentService documents, CancellationToken ct) =>
             {
-                if (Caller(http, resolveHolder) is not { } caller)
+                if (Caller(http, resolveSpace) is not { } caller)
                     return Refusal(http);
 
                 // A page filtered by the host's authorization may come back shorter than the page size: its
                 // token still positions the next one.
-                var page = await documents.ListAsync(caller.Holder, continuationToken, ct);
+                var page = await documents.ListAsync(caller.Space, continuationToken, ct);
                 var allowed = new List<DocumentResponse>();
                 foreach (var document in page.Documents)
                 {
@@ -133,7 +133,7 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapGet("/{id:guid}", async (HttpContext http, Guid id, IDocumentService documents, CancellationToken ct) =>
             {
-                var access = await AuthorizeAsync(http, resolveHolder, documents, id, ct);
+                var access = await AuthorizeAsync(http, resolveSpace, documents, id, ct);
                 return access.Failure ?? Results.Ok(DocumentResponse.From(access.Document!));
             })
             .WithMetadata(DocumentOperations.Read)
@@ -142,13 +142,13 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapPut("/{id:guid}/content", async (HttpContext http, Guid id, IDocumentService documents, CancellationToken ct) =>
             {
-                var access = await AuthorizeAsync(http, resolveHolder, documents, id, ct);
+                var access = await AuthorizeAsync(http, resolveSpace, documents, id, ct);
                 if (access.Failure is not null)
                     return access.Failure;
 
                 return await WithUploadAsync(http, async (_, upload) =>
                 {
-                    var document = await documents.UpdateContentAsync(access.Holder, id, upload, access.Actor, ct);
+                    var document = await documents.UpdateContentAsync(access.Space, id, upload, access.Actor, ct);
                     return Results.Ok(DocumentResponse.From(document));
                 }, ct);
             })
@@ -159,12 +159,12 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapGet("/{id:guid}/content", async (HttpContext http, Guid id, IDocumentService documents, CancellationToken ct) =>
             {
-                var access = await AuthorizeAsync(http, resolveHolder, documents, id, ct);
+                var access = await AuthorizeAsync(http, resolveSpace, documents, id, ct);
                 if (access.Failure is not null)
                     return access.Failure;
 
                 var document = access.Document!;
-                var stream = await documents.OpenContentAsync(access.Holder, id, ct);
+                var stream = await documents.OpenContentAsync(access.Space, id, ct);
                 return Content(http, stream, document.ContentType, document.FileName, document.ContentHash);
             })
             .WithMetadata(DocumentOperations.ReadContent)
@@ -172,11 +172,11 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapGet("/{id:guid}/versions", async (HttpContext http, Guid id, IDocumentService documents, CancellationToken ct) =>
             {
-                var access = await AuthorizeAsync(http, resolveHolder, documents, id, ct);
+                var access = await AuthorizeAsync(http, resolveSpace, documents, id, ct);
                 if (access.Failure is not null)
                     return access.Failure;
 
-                var versions = await documents.GetVersionsAsync(access.Holder, id, ct);
+                var versions = await documents.GetVersionsAsync(access.Space, id, ct);
                 return Results.Ok(versions.Select(DocumentVersionResponse.From).ToList());
             })
             .WithMetadata(DocumentOperations.ListVersions)
@@ -185,15 +185,15 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapGet("/{id:guid}/versions/{version:int}/content", async (HttpContext http, Guid id, int version, IDocumentService documents, CancellationToken ct) =>
             {
-                var access = await AuthorizeAsync(http, resolveHolder, documents, id, ct);
+                var access = await AuthorizeAsync(http, resolveSpace, documents, id, ct);
                 if (access.Failure is not null)
                     return access.Failure;
 
-                var revision = (await documents.GetVersionsAsync(access.Holder, id, ct)).FirstOrDefault(v => v.VersionNumber == version);
+                var revision = (await documents.GetVersionsAsync(access.Space, id, ct)).FirstOrDefault(v => v.VersionNumber == version);
                 if (revision is null)
                     return Results.NotFound();
 
-                var stream = await documents.OpenVersionContentAsync(access.Holder, id, version, ct);
+                var stream = await documents.OpenVersionContentAsync(access.Space, id, version, ct);
                 return Content(http, stream, revision.ContentType, revision.FileName, revision.ContentHash);
             })
             .WithMetadata(DocumentOperations.ReadVersionContent)
@@ -201,11 +201,11 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapDelete("/{id:guid}", async (HttpContext http, Guid id, IDocumentService documents, CancellationToken ct) =>
             {
-                var access = await AuthorizeAsync(http, resolveHolder, documents, id, ct);
+                var access = await AuthorizeAsync(http, resolveSpace, documents, id, ct);
                 if (access.Failure is not null)
                     return access.Failure;
 
-                await documents.TrashAsync(access.Holder, id, access.Actor, ct);
+                await documents.TrashAsync(access.Space, id, access.Actor, ct);
                 return Results.NoContent();
             })
             .WithMetadata(DocumentOperations.Trash)
@@ -214,45 +214,48 @@ public static class EndpointRouteBuilderExtensions
 
         group.MapDelete("/", async (HttpContext http, IDocumentService documents, CancellationToken ct) =>
             {
-                if (Caller(http, resolveHolder) is not { } caller)
+                if (Caller(http, resolveSpace) is not { } caller)
                     return Refusal(http);
 
-                var purged = await documents.PurgeHolderAsync(caller.Holder, ct);
+                // The shared space has no purge.
+                if (caller.Space.Compartment is not { } compartment)
+                    return Results.NotFound();
+
+                var purged = await documents.PurgeCompartmentAsync(compartment, ct);
                 return Results.Ok(new { purged });
             })
             .WithMetadata(DocumentOperations.Purge)
-            .WithName("PurgeHolderDocuments");
+            .WithName("PurgeCompartmentDocuments");
 
         return group;
     }
 
     private static async Task<Access> AuthorizeAsync(
-        HttpContext http, Func<HttpContext, string?> resolveHolder, IDocumentService documents, Guid id, CancellationToken ct)
+        HttpContext http, Func<HttpContext, Space?> resolveSpace, IDocumentService documents, Guid id, CancellationToken ct)
     {
-        if (Caller(http, resolveHolder) is not { } caller)
+        if (Caller(http, resolveSpace) is not { } caller)
             return Access.Refused(Refusal(http));
 
         // A refusal is indistinguishable from an absence, so a caller cannot probe a document's existence.
-        var document = await documents.GetAsync(caller.Holder, id, ct);
+        var document = await documents.GetAsync(caller.Space, id, ct);
         if (document is null || !await http.AuthorizeResourceAsync(document))
             return Access.Refused(Results.NotFound());
 
-        return new Access(caller.Holder, caller.Actor, document, null);
+        return new Access(caller.Space, caller.Actor, document, null);
     }
 
-    private static (string Holder, string Actor)? Caller(HttpContext http, Func<HttpContext, string?> resolveHolder)
+    private static (Space Space, Actor Actor)? Caller(HttpContext http, Func<HttpContext, Space?> resolveSpace)
     {
-        var holder = resolveHolder(http);
-        var actor = Subject(http.User);
-        return holder is null || string.IsNullOrWhiteSpace(actor) ? null : (holder, actor);
+        var space = resolveSpace(http);
+        return space is null || Subject(http.User) is not { } actor ? null : (space, actor);
     }
 
-    // Caller is null for one of two reasons: no subject (401) or no holder for this request (404).
+    // Caller is null for one of two reasons: no valid subject (401) or no space for this request (404).
     private static IResult Refusal(HttpContext http)
-        => string.IsNullOrWhiteSpace(Subject(http.User)) ? Results.Unauthorized() : Results.NotFound();
+        => Subject(http.User) is null ? Results.Unauthorized() : Results.NotFound();
 
-    private static string? Subject(ClaimsPrincipal user)
-        => user.FindFirst("sub")?.Value ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    private static Actor? Subject(ClaimsPrincipal user)
+        => Actor.TryParse(user.FindFirst("sub")?.Value ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var actor) ? actor : null;
 
     private const int MaxFieldLength = 1024;
 
@@ -342,8 +345,8 @@ public static class EndpointRouteBuilderExtensions
             entityTag: new EntityTagHeaderValue($"\"{contentHash}\""), enableRangeProcessing: true);
     }
 
-    private sealed record Access(string Holder, string Actor, Document? Document, IResult? Failure)
+    private sealed record Access(Space Space, Actor Actor, Document? Document, IResult? Failure)
     {
-        public static Access Refused(IResult failure) => new(string.Empty, string.Empty, null, failure);
+        public static Access Refused(IResult failure) => new(null!, null!, null, failure);
     }
 }

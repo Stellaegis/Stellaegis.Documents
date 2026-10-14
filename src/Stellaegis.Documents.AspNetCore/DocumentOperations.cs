@@ -16,7 +16,7 @@ public static class DocumentOperations
     /// <summary><c>POST documents</c>: creates a document.</summary>
     public static readonly Operation Create = new(Module, "create", OperationKind.Write);
 
-    /// <summary><c>GET documents</c>: lists the holder's active documents, a page at a time.</summary>
+    /// <summary><c>GET documents</c>: lists the active documents of the space, a page at a time.</summary>
     public static readonly Operation List = new(Module, "list", OperationKind.Read);
 
     /// <summary><c>GET documents/{id}</c>: reads a document's metadata.</summary>
@@ -37,6 +37,6 @@ public static class DocumentOperations
     /// <summary><c>DELETE documents/{id}</c>: moves a document to the trash.</summary>
     public static readonly Operation Trash = new(Module, "trash", OperationKind.Delete);
 
-    /// <summary><c>DELETE documents</c>: deletes every document of the holder for good.</summary>
+    /// <summary><c>DELETE documents</c>: deletes every document of the compartment for good.</summary>
     public static readonly Operation Purge = new(Module, "purge", OperationKind.Delete);
 }

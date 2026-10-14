@@ -13,15 +13,15 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     private readonly ConcurrentDictionary<Guid, Document> _documents = new();
     private readonly ConcurrentDictionary<(Guid Id, int Version), DocumentVersion> _versions = new();
 
-    public Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
-        => Task.FromResult(Find(holder, documentUniqueId));
+    public Task<Document?> GetAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+        => Task.FromResult(Find(space, documentUniqueId));
 
-    public Task<IReadOnlyList<Document>> ListAsync(string holder, DocumentCursor? after, int limit, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<Document>> ListAsync(Space space, DocumentCursor? after, int limit, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
 
         var result = _documents.Values
-            .Where(d => d.Holder == holder && d.Status == DocumentStatus.Active)
+            .Where(d => d.Space == space && d.Status == DocumentStatus.Active)
             .Where(d => after is null || IsAfter(d, after))
             .OrderByDescending(d => d.CreatedAt)
             .ThenByDescending(d => d.DocumentUniqueId)
@@ -30,11 +30,11 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
 
-    public Task<IReadOnlyList<Document>> ListAnyStatusAsync(string holder, int limit, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<Document>> ListAnyStatusAsync(Space space, int limit, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
 
-        var result = _documents.Values.Where(d => d.Holder == holder).Take(limit).ToList();
+        var result = _documents.Values.Where(d => d.Space == space).Take(limit).ToList();
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
 
@@ -55,7 +55,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
     {
         Guard.NotNull(document);
 
-        if (Find(document.Holder, document.DocumentUniqueId) is null)
+        if (Find(document.Space, document.DocumentUniqueId) is null)
             return Task.CompletedTask;
 
         _documents[document.DocumentUniqueId] = document;
@@ -65,34 +65,34 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.CompletedTask;
     }
 
-    public Task SetStatusAsync(string holder, Guid documentUniqueId, DocumentStatus status, string modifiedBy, DateTimeOffset modifiedAt, CancellationToken cancellationToken = default)
+    public Task SetStatusAsync(Space space, Guid documentUniqueId, DocumentStatus status, Actor modifiedBy, DateTimeOffset modifiedAt, CancellationToken cancellationToken = default)
     {
-        if (Find(holder, documentUniqueId) is { } document)
+        if (Find(space, documentUniqueId) is { } document)
             _documents[documentUniqueId] = document with { Status = status, ModifiedBy = modifiedBy, ModifiedAt = modifiedAt };
 
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        var result = Versions(holder, documentUniqueId)
+        var result = Versions(space, documentUniqueId)
             .OrderBy(v => v.VersionNumber)
             .ToList();
         return Task.FromResult<IReadOnlyList<DocumentVersion>>(result);
     }
 
-    public Task<DocumentVersion?> GetVersionAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
+    public Task<DocumentVersion?> GetVersionAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
     {
-        var version = Find(holder, documentUniqueId) is not null
+        var version = Find(space, documentUniqueId) is not null
             && _versions.TryGetValue((documentUniqueId, versionNumber), out var found)
             ? found
             : null;
         return Task.FromResult(version);
     }
 
-    public Task DeleteAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        if (Find(holder, documentUniqueId) is null)
+        if (Find(space, documentUniqueId) is null)
             return Task.CompletedTask;
 
         foreach (var key in _versions.Keys.Where(k => k.Id == documentUniqueId).ToList())
@@ -106,14 +106,14 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         => document.CreatedAt < cursor.CreatedAt
            || (document.CreatedAt == cursor.CreatedAt && document.DocumentUniqueId.CompareTo(cursor.DocumentUniqueId) < 0);
 
-    private Document? Find(string holder, Guid documentUniqueId)
+    private Document? Find(Space space, Guid documentUniqueId)
     {
-        Guard.NotNull(holder);
-        return _documents.TryGetValue(documentUniqueId, out var document) && document.Holder == holder ? document : null;
+        Guard.NotNull(space);
+        return _documents.TryGetValue(documentUniqueId, out var document) && document.Space == space ? document : null;
     }
 
-    private IEnumerable<DocumentVersion> Versions(string holder, Guid documentUniqueId)
-        => Find(holder, documentUniqueId) is null
+    private IEnumerable<DocumentVersion> Versions(Space space, Guid documentUniqueId)
+        => Find(space, documentUniqueId) is null
             ? []
             : _versions.Where(kv => kv.Key.Id == documentUniqueId).Select(kv => kv.Value);
 }

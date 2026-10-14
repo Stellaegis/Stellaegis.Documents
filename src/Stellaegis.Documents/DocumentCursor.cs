@@ -1,7 +1,7 @@
 namespace Stellaegis.Documents;
 
 /// <summary>
-/// A position in a holder's document list, ordered by <see cref="CreatedAt"/> then
+/// A position in a space's document list, ordered by <see cref="CreatedAt"/> then
 /// <see cref="DocumentUniqueId"/>, both descending: a store lists the documents that come after it.
 /// </summary>
 /// <param name="CreatedAt">The creation instant of the last document already returned.</param>

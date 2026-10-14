@@ -9,8 +9,9 @@
 -- links between documents and business objects, search and fine-grained access
 -- stay in the consumer's own database, keyed by document_unique_id.
 --
--- Isolation: every document carries its holder, and every query of the store
--- filters on it. The empty holder is the platform.
+-- Isolation: every document carries its compartment, and every query of the
+-- store filters on it. A null compartment is the shared space: documents that
+-- belong to no compartment, reached only through routes the host marks for it.
 --
 -- Content: one blob per content, stored flat under a key the module derives
 -- from the identity alone, {document_unique_id:N}-{version_number}. No key is
@@ -19,7 +20,7 @@
 --
 -- Keys: document_unique_id is the primary key, and doc.document_versions carries
 -- it as its foreign key. There is no bigint surrogate on purpose: every access
--- starts from the public identifier, and the holder check joins a version to its
+-- starts from the public identifier, and the space check joins a version to its
 -- document in any case, so no internal join would use one.
 -- ============================================================================
 
@@ -35,7 +36,7 @@ create type doc.document_status as enum ('active', 'trashed');
 
 create table doc.documents (
   document_unique_id  uuid                not null default gen_random_uuid(),
-  holder              text                not null,
+  compartment         text,
   document_type       text                not null,
   version_number      integer             not null default 1,
   content_hash        text                not null,
@@ -52,8 +53,8 @@ create table doc.documents (
   modified_by         text,
 
   constraint pk_documents primary key (document_unique_id),
-  constraint ck_documents_holder check (
-    holder = '' or (holder ~ '^[a-z][a-z0-9-]{2,62}$' and holder !~ '--')
+  constraint ck_documents_compartment check (
+    compartment ~ '^[a-z](-?[a-z0-9])+$' and char_length(compartment) between 3 and 63
   ),
   constraint ck_documents_document_type check (char_length(document_type) between 1 and 64),
   constraint ck_documents_version_number check (version_number >= 1),
@@ -69,8 +70,8 @@ comment on table doc.documents is
   'Index of documents: existence and identity, never the content nor the business semantics. The version number, hash and file metadata always describe the current content; doc.document_versions keeps the revisions of a versioned document.';
 comment on column doc.documents.document_unique_id is
   'Public identifier, published in the events and kept by the consumer next to its own objects. Stable across versions.';
-comment on column doc.documents.holder is
-  'The party the document belongs to; empty for the platform. Same grammar as the holder of a Stellaegis.Blobs location, which the check repeats.';
+comment on column doc.documents.compartment is
+  'The compartment the document belongs to; null for the shared space, which holds the documents that belong to no compartment. Same grammar as the Compartment of Stellaegis.Primitives, which the check repeats.';
 comment on column doc.documents.version_number is
   'Number of the current content, from 1, increased by each change of content; the blob key derives from it. A versioned document keeps its former contents in doc.document_versions; one that is not versioned keeps only the current.';
 comment on column doc.documents.content_hash is
@@ -80,7 +81,7 @@ comment on column doc.documents.file_name is
 comment on column doc.documents.key_slot is
   'Passphrase slot (1 or 2) that encrypted file_name; two slots alternate for a key rotation.';
 comment on column doc.documents.status is
-  'Lifecycle: trashed only marks the document; the content stays until the holder is purged.';
+  'Lifecycle: trashed only marks the document; the content stays until its compartment is purged. The shared space has no purge: its trashed documents stay.';
 comment on column doc.documents.is_versioned is
   'Set at creation by the consumer: a content change then adds a row to doc.document_versions instead of overwriting in place.';
 
@@ -112,7 +113,7 @@ create table doc.document_versions (
 );
 
 comment on table doc.document_versions is
-  'Revisions of a versioned document, each with its own file metadata; its content is the blob of the same version number. Read through the document, whose holder scopes every access.';
+  'Revisions of a versioned document, each with its own file metadata; its content is the blob of the same version number. Read through the document, whose compartment scopes every access.';
 comment on column doc.document_versions.file_name is
   'File name of this revision, encrypted as doc.documents.file_name.';
 
@@ -120,10 +121,11 @@ comment on column doc.document_versions.file_name is
 -- Indexes
 -- ============================================================================
 
--- A holder's documents: the paged list (active ones, most recent first, keyset on
--- created_at then document_unique_id) and the purge (any status).
-create index ix_documents_holder_created
-  on doc.documents (holder, created_at desc, document_unique_id desc);
+-- The documents of a space: the paged list (active ones, most recent first, keyset
+-- on created_at then document_unique_id) and the purge (any status). The shared
+-- space is the null compartment, which the index holds like any other value.
+create index ix_documents_compartment_created
+  on doc.documents (compartment, created_at desc, document_unique_id desc);
 
 -- ============================================================================
 -- Framework evolution tracking

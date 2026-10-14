@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Stellaegis.Documents.AspNetCore</RootNamespace>
     <PackageId>Stellaegis.Documents.AspNetCore</PackageId>
-    <Description>ASP.NET Core endpoints for Stellaegis.Documents: upload, download, versions and trash, mapped on a group the host provides, for the holder the host resolves.</Description>
+    <Description>ASP.NET Core endpoints for Stellaegis.Documents: upload, download, versions and trash, mapped on a group the host provides, in the space the host resolves.</Description>
     <PackageTags>stellaegis;documents;document-management;aspnetcore</PackageTags>
   </PropertyGroup>
 

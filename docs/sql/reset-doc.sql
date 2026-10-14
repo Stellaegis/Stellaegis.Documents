@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Stellaegis.Documents — reset script for schema doc
 -- ============================================================================
--- WARNING: destroys every document of every holder. Irreversible, and the
+-- WARNING: destroys every document of every space. Irreversible, and the
 -- content in the blob store is left behind. For development only.
 -- Usage: psql -d <database> -f reset-doc.sql
 -- ============================================================================

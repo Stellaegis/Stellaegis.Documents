@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Stellaegis.Documents;
 
 /// <summary>
-/// A document as the HTTP API returns it: its index metadata, never its holder, which the caller
+/// A document as the HTTP API returns it: its index metadata, never its space, which the caller
 /// already addresses.
 /// </summary>
 /// <param name="DocumentUniqueId">Stable public identifier.</param>
@@ -16,7 +16,7 @@ namespace Stellaegis.Documents;
 /// <param name="IsVersioned">Whether the document keeps a version history.</param>
 /// <param name="Status">Lifecycle status.</param>
 /// <param name="CreatedAt">Creation instant.</param>
-/// <param name="CreatedBy">Creator subject.</param>
+/// <param name="CreatedBy">Who created the document.</param>
 /// <param name="ModifiedAt">Last modification instant, if any.</param>
 /// <param name="ModifiedBy">Last modifier, if any.</param>
 public sealed record DocumentResponse(
@@ -46,9 +46,9 @@ public sealed record DocumentResponse(
         document.IsVersioned,
         document.Status,
         document.CreatedAt,
-        document.CreatedBy,
+        document.CreatedBy.Value,
         document.ModifiedAt,
-        document.ModifiedBy);
+        document.ModifiedBy?.Value);
 }
 
 /// <summary>A document revision as the HTTP API returns it.</summary>
@@ -58,7 +58,7 @@ public sealed record DocumentResponse(
 /// <param name="ContentLength">Length of this revision, in bytes.</param>
 /// <param name="ContentHash">SHA-256 (lowercase hex) of this revision's content.</param>
 /// <param name="CreatedAt">Creation instant.</param>
-/// <param name="CreatedBy">Creator subject.</param>
+/// <param name="CreatedBy">Who created the revision.</param>
 public sealed record DocumentVersionResponse(
     int VersionNumber,
     string FileName,
@@ -76,7 +76,7 @@ public sealed record DocumentVersionResponse(
         version.ContentLength,
         version.ContentHash,
         version.CreatedAt,
-        version.CreatedBy);
+        version.CreatedBy.Value);
 }
 
 /// <summary>One page of documents as the HTTP API returns it.</summary>

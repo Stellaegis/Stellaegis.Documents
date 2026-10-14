@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Stellaegis.Documents</RootNamespace>
     <PackageId>Stellaegis.Documents</PackageId>
-    <Description>Document management: versioned documents indexed by identity, isolated per holder, with their content stored through Stellaegis.Blobs.</Description>
+    <Description>Document management: versioned documents indexed by identity, isolated per compartment or shared, with their content stored through Stellaegis.Blobs.</Description>
     <PackageTags>stellaegis;documents;document-management;versioning</PackageTags>
   </PropertyGroup>
 

@@ -1,3 +1,5 @@
+using Stellaegis.Primitives;
+
 namespace Stellaegis.Documents;
 
 /// <summary>
@@ -11,8 +13,8 @@ public sealed record Document
     /// <summary>Stable public GUID — published in events and referenced by the consumer's projection.</summary>
     public Guid DocumentUniqueId { get; init; }
 
-    /// <summary>The holder the document belongs to, or the empty string for the platform.</summary>
-    public required string Holder { get; init; }
+    /// <summary>The space the document belongs to: a compartment, or the shared space.</summary>
+    public required Space Space { get; init; }
 
     /// <summary>Application-defined document type code.</summary>
     public required string DocumentType { get; init; }
@@ -45,12 +47,12 @@ public sealed record Document
     /// <summary>Creation timestamp.</summary>
     public DateTimeOffset CreatedAt { get; init; }
 
-    /// <summary>Creator subject.</summary>
-    public required string CreatedBy { get; init; }
+    /// <summary>Who created the document.</summary>
+    public required Actor CreatedBy { get; init; }
 
     /// <summary>Last modification timestamp, if any.</summary>
     public DateTimeOffset? ModifiedAt { get; init; }
 
-    /// <summary>Last modifier, if any.</summary>
-    public string? ModifiedBy { get; init; }
+    /// <summary>Who last modified the document, if anyone.</summary>
+    public Actor? ModifiedBy { get; init; }
 }

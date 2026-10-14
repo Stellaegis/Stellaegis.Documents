@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Stellaegis.Documents.PostgreSQL</RootNamespace>
     <PackageId>Stellaegis.Documents.PostgreSQL</PackageId>
-    <Description>PostgreSQL store for Stellaegis.Documents (schema doc): documents and versions per holder, file names encrypted with pgcrypto.</Description>
+    <Description>PostgreSQL store for Stellaegis.Documents (schema doc): documents and versions per compartment or shared, file names encrypted with pgcrypto.</Description>
     <PackageTags>stellaegis;documents;document-management;postgresql</PackageTags>
   </PropertyGroup>
 

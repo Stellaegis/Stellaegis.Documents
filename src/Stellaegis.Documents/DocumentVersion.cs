@@ -1,3 +1,5 @@
+using Stellaegis.Primitives;
+
 namespace Stellaegis.Documents;
 
 /// <summary>
@@ -29,6 +31,6 @@ public sealed record DocumentVersion
     /// <summary>Creation timestamp.</summary>
     public DateTimeOffset CreatedAt { get; init; }
 
-    /// <summary>Creator subject.</summary>
-    public required string CreatedBy { get; init; }
+    /// <summary>Who created this revision.</summary>
+    public required Actor CreatedBy { get; init; }
 }

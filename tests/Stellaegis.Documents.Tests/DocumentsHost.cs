@@ -14,12 +14,13 @@ using Microsoft.Extensions.Options;
 using Stellaegis.Blobs.FileSystem;
 using Stellaegis.Documents.AspNetCore;
 using Stellaegis.Documents.Client;
+using Stellaegis.Primitives;
 using Stellaegis.Primitives.AspNetCore;
 
 namespace Stellaegis.Documents.Tests;
 
 /// <summary>
-/// An in-memory host mapping the document API under <c>/api/t/{holder}</c>, as Stellaegis routes its tenants:
+/// An in-memory host mapping the document API under <c>/api/t/{compartment}</c>, as Stellaegis routes its tenants:
 /// every operation for any authenticated caller but the purge, kept for the <c>admin</c> role, and an
 /// authorization handler that refuses <c>mallory</c> every document. The caller's identity is a header, set by <see cref="Http"/> and
 /// <see cref="Client"/>.
@@ -52,8 +53,8 @@ public sealed class DocumentsHost : IAsyncLifetime
         _app = builder.Build();
         _app.UseAuthentication();
         _app.UseAuthorization();
-        _app.MapGroup("/api/t/{holder}")
-            .MapDocumentsEndpoints(http => http.GetRouteValue("holder") as string)
+        _app.MapGroup("/api/t/{compartment}")
+            .MapDocumentsEndpoints(http => Compartment.TryParse(http.GetRouteValue("compartment") as string, out var c) ? c : null)
             .RequireAuthorizationPerOperation(op => op == DocumentOperations.Purge ? "admin" : "member");
         await _app.StartAsync();
     }
@@ -85,7 +86,7 @@ public sealed class DocumentsHost : IAsyncLifetime
             .Build();
 
         var services = new ServiceCollection();
-        services.AddStellaegisDocumentsClient(configuration, holder => $"t/{holder}/")
+        services.AddStellaegisDocumentsClient(configuration, compartment => $"t/{compartment}/")
             .ConfigurePrimaryHttpMessageHandler(() => Server.CreateHandler())
             .AddHttpMessageHandler(() => new Identity(subject, role))
             .AddHttpMessageHandler(() => new Damage(damage));

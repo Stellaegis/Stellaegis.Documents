@@ -9,8 +9,8 @@ public sealed class DocumentsOptions
     public const string SectionName = "Stellaegis:Documents";
 
     /// <summary>
-    /// The blob space holding document content, within each holder's storage. Must be a valid space
-    /// name for <c>BlobLocation</c> (Stellaegis.Blobs): at most 63 characters.
+    /// The blob name holding document content, within the storage of each space. Must be a valid name
+    /// for <c>BlobLocation</c> (Stellaegis.Blobs): at most 63 characters.
     /// </summary>
     public string BlobSpace { get; init; } = "documents";
 

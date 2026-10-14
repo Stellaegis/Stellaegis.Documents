@@ -1,7 +1,7 @@
 namespace Stellaegis.Documents;
 
 /// <summary>
-/// One page of a holder's active documents, most recent first.
+/// One page of a space's active documents, most recent first.
 /// </summary>
 /// <param name="Documents">The documents of this page.</param>
 /// <param name="ContinuationToken">

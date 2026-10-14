@@ -76,8 +76,17 @@ internal sealed class DocumentsHarness : IAsyncDisposable
 /// <summary>Content helpers shared by the tests.</summary>
 internal static class Content
 {
-    /// <summary>A holder no other test uses: the PostgreSQL tests share one database.</summary>
-    public static string NewHolder() => "t" + Guid.NewGuid().ToString("N");
+    /// <summary>A compartment no other test uses: the PostgreSQL tests share one database.</summary>
+    public static Compartment NewCompartment() => Compartment.Parse("t" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>Actors of the tests.</summary>
+    public static Actor Alice { get; } = Actor.Parse("alice");
+
+    /// <inheritdoc cref="Alice"/>
+    public static Actor Bob { get; } = Actor.Parse("bob");
+
+    /// <inheritdoc cref="Alice"/>
+    public static Actor Mallory { get; } = Actor.Parse("mallory");
 
     /// <summary>A text content to upload.</summary>
     public static DocumentUpload Upload(string text, string fileName = "file.txt", string contentType = "text/plain", string? expectedHash = null)

@@ -33,9 +33,9 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
     private readonly HttpClient _http = Guard.NotNull(http);
     private readonly DocumentsHolderPath _holderPath = Guard.NotNull(holderPath);
 
-    public async Task<Document> CreateAsync(string holder, string documentType, DocumentUpload upload, string actor, bool isVersioned = false, CancellationToken cancellationToken = default)
+    public async Task<Document> CreateAsync(Space space, string documentType, DocumentUpload upload, Actor actor, bool isVersioned = false, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
         Guard.NotWhiteSpace(documentType);
         Guard.NotNull(upload);
 
@@ -47,58 +47,58 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         };
         AddFile(form, upload);
 
-        using var response = await _http.PostAsync(Url(holder, string.Empty), form, cancellationToken).ConfigureAwait(false);
+        using var response = await _http.PostAsync(Url(space, string.Empty), form, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, null, cancellationToken).ConfigureAwait(false);
-        return ToDocument(holder, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
+        return ToDocument(space, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
     }
 
-    public async Task<Document> UpdateContentAsync(string holder, Guid documentUniqueId, DocumentUpload upload, string actor, CancellationToken cancellationToken = default)
+    public async Task<Document> UpdateContentAsync(Space space, Guid documentUniqueId, DocumentUpload upload, Actor actor, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
         Guard.NotNull(upload);
 
         using var form = new MultipartFormDataContent();
         AddFile(form, upload);
-        using var response = await _http.PutAsync(Url(holder, $"/{documentUniqueId:N}/content"), form, cancellationToken).ConfigureAwait(false);
+        using var response = await _http.PutAsync(Url(space, $"/{documentUniqueId:N}/content"), form, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, documentUniqueId, cancellationToken).ConfigureAwait(false);
-        return ToDocument(holder, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
+        return ToDocument(space, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
     }
 
-    public Task<Stream> OpenContentAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
-        => OpenAsync(Url(Guard.NotNull(holder), $"/{documentUniqueId:N}/content"), documentUniqueId, cancellationToken);
+    public Task<Stream> OpenContentAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+        => OpenAsync(Url(Guard.NotNull(space), $"/{documentUniqueId:N}/content"), documentUniqueId, cancellationToken);
 
-    public Task<Stream> OpenVersionContentAsync(string holder, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
-        => OpenAsync(Url(Guard.NotNull(holder), $"/{documentUniqueId:N}/versions/{versionNumber}/content"), documentUniqueId, cancellationToken);
+    public Task<Stream> OpenVersionContentAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
+        => OpenAsync(Url(Guard.NotNull(space), $"/{documentUniqueId:N}/versions/{versionNumber}/content"), documentUniqueId, cancellationToken);
 
-    public async Task<Document?> GetAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<Document?> GetAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
 
-        using var response = await _http.GetAsync(Url(holder, $"/{documentUniqueId:N}"), cancellationToken).ConfigureAwait(false);
+        using var response = await _http.GetAsync(Url(space, $"/{documentUniqueId:N}"), cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
             return null;
 
         await EnsureSuccessAsync(response, documentUniqueId, cancellationToken).ConfigureAwait(false);
-        return ToDocument(holder, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
+        return ToDocument(space, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
     }
 
-    public async Task<DocumentPage> ListAsync(string holder, string? continuationToken = null, CancellationToken cancellationToken = default)
+    public async Task<DocumentPage> ListAsync(Space space, string? continuationToken = null, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
 
         var query = continuationToken is null ? string.Empty : "?continuationToken=" + Uri.EscapeDataString(continuationToken);
-        using var response = await _http.GetAsync(Url(holder, query), cancellationToken).ConfigureAwait(false);
+        using var response = await _http.GetAsync(Url(space, query), cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, null, cancellationToken).ConfigureAwait(false);
 
         var page = await ReadAsync<DocumentPageResponse>(response, cancellationToken).ConfigureAwait(false);
-        return new DocumentPage(page.Documents.Select(d => ToDocument(holder, d)).ToList(), page.ContinuationToken);
+        return new DocumentPage(page.Documents.Select(d => ToDocument(space, d)).ToList(), page.ContinuationToken);
     }
 
-    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(string holder, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
 
-        using var response = await _http.GetAsync(Url(holder, $"/{documentUniqueId:N}/versions"), cancellationToken).ConfigureAwait(false);
+        using var response = await _http.GetAsync(Url(space, $"/{documentUniqueId:N}/versions"), cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, documentUniqueId, cancellationToken).ConfigureAwait(false);
 
         var versions = await ReadAsync<List<DocumentVersionResponse>>(response, cancellationToken).ConfigureAwait(false);
@@ -111,23 +111,23 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
             ContentLength = v.ContentLength,
             ContentHash = v.ContentHash,
             CreatedAt = v.CreatedAt,
-            CreatedBy = v.CreatedBy,
+            CreatedBy = Actor.Parse(v.CreatedBy),
         }).ToList();
     }
 
-    public async Task TrashAsync(string holder, Guid documentUniqueId, string actor, CancellationToken cancellationToken = default)
+    public async Task TrashAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
-        Guard.NotNull(holder);
+        Guard.NotNull(space);
 
-        using var response = await _http.DeleteAsync(Url(holder, $"/{documentUniqueId:N}"), cancellationToken).ConfigureAwait(false);
+        using var response = await _http.DeleteAsync(Url(space, $"/{documentUniqueId:N}"), cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, documentUniqueId, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<int> PurgeHolderAsync(string holder, CancellationToken cancellationToken = default)
+    public async Task<int> PurgeCompartmentAsync(Compartment compartment, CancellationToken cancellationToken = default)
     {
-        Guard.NotWhiteSpace(holder);
+        Guard.NotNull(compartment);
 
-        using var response = await _http.DeleteAsync(Url(holder, string.Empty), cancellationToken).ConfigureAwait(false);
+        using var response = await _http.DeleteAsync(Url(compartment, string.Empty), cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, null, cancellationToken).ConfigureAwait(false);
         return (await ReadAsync<PurgeResponse>(response, cancellationToken).ConfigureAwait(false)).Purged;
     }
@@ -152,7 +152,10 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         }
     }
 
-    private string Url(string holder, string rest) => $"{_holderPath.For(holder)}documents{rest}";
+    private string Url(Space space, string rest)
+        => space.Compartment is { } compartment
+            ? $"{_holderPath.For(compartment.Value)}documents{rest}"
+            : throw new InvalidOperationException("This client has no URL for the shared space.");
 
     private static void AddFile(MultipartFormDataContent form, DocumentUpload upload)
     {
@@ -229,10 +232,10 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         }
     }
 
-    private static Document ToDocument(string holder, DocumentResponse response) => new()
+    private static Document ToDocument(Space space, DocumentResponse response) => new()
     {
         DocumentUniqueId = response.DocumentUniqueId,
-        Holder = holder,
+        Space = space,
         DocumentType = response.DocumentType,
         VersionNumber = response.VersionNumber,
         ContentHash = response.ContentHash,
@@ -242,9 +245,9 @@ internal sealed class HttpDocumentService(HttpClient http, DocumentsHolderPath h
         Status = response.Status,
         IsVersioned = response.IsVersioned,
         CreatedAt = response.CreatedAt,
-        CreatedBy = response.CreatedBy,
+        CreatedBy = Actor.Parse(response.CreatedBy),
         ModifiedAt = response.ModifiedAt,
-        ModifiedBy = response.ModifiedBy,
+        ModifiedBy = response.ModifiedBy is null ? null : Actor.Parse(response.ModifiedBy),
     };
 
     private sealed record PurgeResponse(int Purged);

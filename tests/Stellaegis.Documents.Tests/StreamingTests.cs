@@ -40,13 +40,13 @@ public sealed class StreamingTests
     public async Task Storing_replacing_and_reading_a_large_content_allocate_a_few_buffers()
     {
         await using var harness = DocumentsHarness.InMemory();
-        var holder = Content.NewHolder();
+        var compartment = Content.NewCompartment();
 
-        var (created, onCreate) = await MeasureAsync(() => harness.Documents.CreateAsync(holder, "archive", Generated(1), "alice", cancellationToken: Ct));
-        var (updated, onUpdate) = await MeasureAsync(() => harness.Documents.UpdateContentAsync(holder, created.DocumentUniqueId, Generated(2), "alice", Ct));
+        var (created, onCreate) = await MeasureAsync(() => harness.Documents.CreateAsync(compartment, "archive", Generated(1), Content.Alice, cancellationToken: Ct));
+        var (updated, onUpdate) = await MeasureAsync(() => harness.Documents.UpdateContentAsync(compartment, created.DocumentUniqueId, Generated(2), Content.Alice, Ct));
         var (hash, onRead) = await MeasureAsync(async () =>
         {
-            await using var stream = await harness.Documents.OpenContentAsync(holder, created.DocumentUniqueId, Ct);
+            await using var stream = await harness.Documents.OpenContentAsync(compartment, created.DocumentUniqueId, Ct);
             return Convert.ToHexStringLower(await System.Security.Cryptography.SHA256.HashDataAsync(stream, Ct));
         });
 
@@ -70,7 +70,7 @@ public sealed class StreamingTests
         file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         form.Add(file, "file", "big.bin");
 
-        var (answer, allocated) = await MeasureAsync(() => http.PostAsync($"/api/t/{Content.NewHolder()}/documents", form, Ct));
+        var (answer, allocated) = await MeasureAsync(() => http.PostAsync($"/api/t/{Content.NewCompartment()}/documents", form, Ct));
 
         Assert.Equal(HttpStatusCode.Created, answer.StatusCode);
         Assert.True(allocated < Budget, $"Uploading {Size} bytes over HTTP allocated {allocated}, sender, endpoints and service together.");

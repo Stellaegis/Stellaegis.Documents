@@ -10,9 +10,9 @@
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13" />
     <!-- Stellaegis -->
-    <PackageVersion Include="Stellaegis.Primitives" Version="1.1.0" />
-    <PackageVersion Include="Stellaegis.Primitives.Data" Version="1.1.0" />
-    <PackageVersion Include="Stellaegis.Blobs" Version="1.0.1" />
+    <PackageVersion Include="Stellaegis.Primitives" Version="2.0.0" />
+    <PackageVersion Include="Stellaegis.Primitives.Data" Version="2.0.0" />
+    <PackageVersion Include="Stellaegis.Blobs" Version="2.0.1" />
     <PackageVersion Include="Stellaegis.Primitives.AspNetCore" Version="1.1.0" />
     <!-- Data access -->
     <PackageVersion Include="Dapper" Version="2.1.89" />
@@ -23,6 +23,6 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.13" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />
-    <PackageVersion Include="Stellaegis.Blobs.FileSystem" Version="1.0.1" />
+    <PackageVersion Include="Stellaegis.Blobs.FileSystem" Version="2.0.1" />
   </ItemGroup>
 </Project>
