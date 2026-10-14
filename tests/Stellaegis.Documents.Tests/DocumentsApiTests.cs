@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using Microsoft.AspNetCore.Routing;
 using Stellaegis.Documents.AspNetCore;
 using Stellaegis.Primitives;
 using Stellaegis.Primitives.AspNetCore;
@@ -183,12 +184,54 @@ public sealed class DocumentsApiTests(DocumentsHost host) : IClassFixture<Docume
     [Fact]
     public void Every_route_carries_an_operation_of_its_own()
     {
-        var operations = host.Endpoints.Select(e => e.GetOperation()).ToList();
+        var operations = host.Endpoints
+            .Where(e => e.RoutePattern.RawText!.StartsWith("/api/t/", StringComparison.Ordinal))
+            .Select(e => e.GetOperation()).ToList();
 
         Assert.Equal(9, operations.Count);
         Assert.DoesNotContain(null, operations);
         Assert.Equal(operations.Count, operations.Distinct().Count());
         Assert.All(operations, op => Assert.Equal(DocumentOperations.Module, op!.Module));
+    }
+
+    [Fact]
+    public void The_routes_carry_no_name_so_the_module_maps_twice()
+    {
+        Assert.Equal(18, host.Endpoints.Count);
+        Assert.All(host.Endpoints, e => Assert.Null(e.Metadata.GetMetadata<IEndpointNameMetadata>()));
+    }
+
+    [Fact]
+    public async Task The_shared_space_is_reached_only_through_its_marked_routes()
+    {
+        var http = host.Http("alice");
+        var created = await http.PostAsync("/api/shared/documents", Form("logo", "logo.svg"), Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var shared = (await created.Content.ReadFromJsonAsync<DocumentResponse>(Ct))!;
+        var (compartment, owned) = await CreateAsync(http);
+
+        Assert.Equal("logo", await http.GetStringAsync($"/api/shared/documents/{shared.DocumentUniqueId}/content", Ct));
+        Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/api/t/{compartment}/documents/{shared.DocumentUniqueId}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/api/shared/documents/{owned.DocumentUniqueId}", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task An_unresolved_space_and_an_unmapped_route_both_answer_404()
+    {
+        var http = host.Http("alice");
+
+        Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/t/Not-A-Compartment/documents", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/elsewhere/documents", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_shared_space_has_no_purge()
+    {
+        var created = await host.Http("alice").PostAsync("/api/shared/documents", Form("logo"), Ct);
+        var shared = (await created.Content.ReadFromJsonAsync<DocumentResponse>(Ct))!;
+
+        Assert.Equal(HttpStatusCode.NotFound, (await host.Http("ops", "admin").DeleteAsync("/api/shared/documents", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await host.Http("alice").GetAsync($"/api/shared/documents/{shared.DocumentUniqueId}", Ct)).StatusCode);
     }
 
     [Fact]

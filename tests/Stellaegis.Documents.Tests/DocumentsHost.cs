@@ -20,8 +20,9 @@ using Stellaegis.Primitives.AspNetCore;
 namespace Stellaegis.Documents.Tests;
 
 /// <summary>
-/// An in-memory host mapping the document API under <c>/api/t/{compartment}</c>, as Stellaegis routes its tenants:
-/// every operation for any authenticated caller but the purge, kept for the <c>admin</c> role, and an
+/// An in-memory host mapping the document API twice: under <c>/api/t/{compartment}</c>, as Stellaegis routes its
+/// tenants, and under <c>/api/shared</c> for the shared space. Every operation is open to any authenticated caller
+/// but the purge, kept for the <c>admin</c> role, and an
 /// authorization handler that refuses <c>mallory</c> every document. The caller's identity is a header, set by <see cref="Http"/> and
 /// <see cref="Client"/>.
 /// </summary>
@@ -41,6 +42,7 @@ public sealed class DocumentsHost : IAsyncLifetime
 
         builder.Services.AddStellaegisFileSystemBlobStore(o => o.RootPath = _blobRoot);
         builder.Services.AddStellaegisDocumentsInMemory(builder.Configuration);
+        builder.Services.AddStellaegisRequestContext(c => c.CompartmentFromRoute("compartment"));
         builder.Services.AddSingleton<IAuthorizationHandler, RefuseMallory>();
         builder.Services.AddAuthentication(HeaderIdentity.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, HeaderIdentity>(HeaderIdentity.SchemeName, null);
@@ -53,8 +55,9 @@ public sealed class DocumentsHost : IAsyncLifetime
         _app = builder.Build();
         _app.UseAuthentication();
         _app.UseAuthorization();
-        _app.MapGroup("/api/t/{compartment}")
-            .MapDocumentsEndpoints(http => Compartment.TryParse(http.GetRouteValue("compartment") as string, out var c) ? c : null)
+        _app.MapGroup("/api/t/{compartment}").MapDocumentsEndpoints()
+            .RequireAuthorizationPerOperation(op => op == DocumentOperations.Purge ? "admin" : "member");
+        _app.MapGroup("/api/shared").MapDocumentsEndpoints().InSharedSpace()
             .RequireAuthorizationPerOperation(op => op == DocumentOperations.Purge ? "admin" : "member");
         await _app.StartAsync();
     }
