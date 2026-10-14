@@ -77,7 +77,7 @@ builder.Services.AddStellaegisDocumentsPostgreSQL(builder.Configuration);
 {
   "Stellaegis": {
     "Documents": {
-      "BlobSpace": "documents",
+      "BlobName": "documents",
       "ListPageSize": 100,
       "PostgreSQL": {
         "ConnectionString": "Host=…;Database=…",
@@ -89,7 +89,7 @@ builder.Services.AddStellaegisDocumentsPostgreSQL(builder.Configuration);
 }
 ```
 
-- `BlobSpace` is the Stellaegis.Blobs space the content goes to, within each holder's storage.
+- `BlobName` is the name the content goes to in Stellaegis.Blobs (`BlobLocation.Name`), within each compartment and in the shared space.
 - `ListPageSize` is the number of documents in one page of a list, between 1 and 1000.
 - `Keys` are the passphrases that encrypt file names (see
   [File names are encrypted](#file-names-are-encrypted)). Supply them from a secret store or the
