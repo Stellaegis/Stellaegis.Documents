@@ -5,28 +5,77 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] — 2026-10-14
+
+Each document belongs to a compartment or to the shared space, and the host attaches its own security
+to the routes. Built on Stellaegis.Primitives 2.0.0 and Stellaegis.Blobs 2.0.1.
+
+### Added
+
+- The shared space, `Space.Shared`: documents that belong to no compartment. Over HTTP, the host reaches
+  it by mapping the endpoints a second time on a group marked `InSharedSpace()`; a group without the mark
+  never reaches it.
+- `DocumentIndexedEvent` and `DocumentTrashedEvent` carry `IsShared`.
+- `DocumentsClientOptions.CompartmentUrl` and `SharedUrl`: the client calls one URL per kind of space,
+  `{compartment}` in `CompartmentUrl` replaced by the compartment of each call. A call in a space whose
+  URL is not configured throws an `InvalidOperationException`.
 
 ### Changed
 
-- Each route carries an operation (`DocumentOperations`, on the `Operation` type of
-  Stellaegis.Primitives.AspNetCore 1.1.0), and the host attaches its policies to the returned group,
-  per operation (`RequireAuthorizationPerOperation`). `MapDocumentsEndpoints` no longer takes
-  `readPolicy` and `writePolicy`.
-- The purge is mapped with the other routes, as the `purge` operation. `MapDocumentsPurgeEndpoint` is
-  removed: the purge is exposed wherever the endpoints are, and secured like any other operation.
-- Access to each loaded document is asked through ASP.NET Core resource authorization
+- **Breaking:** every operation of `IDocumentService` takes a `Space` instead of a holder string, and an
+  `Actor` instead of an actor string. `Document.Holder` becomes `Document.Space`; `CreatedBy` and
+  `ModifiedBy` of `Document`, and `CreatedBy` of `DocumentVersion`, become `Actor`. The empty holder that
+  stood for the platform is gone: such documents belong to the shared space.
+- **Breaking:** `PurgeHolderAsync(string)` becomes `PurgeCompartmentAsync(Compartment)`. The shared space
+  has no purge.
+- **Breaking:** the events carry `Compartment`, `null` for the shared space, instead of `Holder`.
+- **Breaking:** the `doc` schema stores `compartment`, nullable, instead of `holder`, with a check that
+  repeats the grammar of `Compartment`, and its index is renamed `ix_documents_compartment_created`.
+- **Breaking:** `MapDocumentsEndpoints()` takes no resolver. The endpoints read the space and the actor
+  from the request context of Stellaegis.Primitives.AspNetCore, which the host registers with
+  `AddStellaegisRequestContext`; startup fails without it. An unresolved compartment answers `404`.
+- **Breaking:** the endpoints no longer read the `sub` claim nor answer `401`: the actor comes from the
+  request context, and whether a route requires an authenticated user is decided by the host's policies.
+- **Breaking:** the endpoints carry no route name, so the module can be mapped once per space: ASP.NET
+  Core requires route names to be unique across a host.
+- **Breaking:** each route carries an operation (`DocumentOperations`, on the `Operation` type of
+  Stellaegis.Primitives.AspNetCore), and the host attaches its policies to the returned group, per
+  operation (`RequireAuthorizationPerOperation`). `MapDocumentsEndpoints` no longer takes `readPolicy` and
+  `writePolicy`.
+- **Breaking:** the purge is mapped with the other routes, as the `purge` operation, and answers `404` in
+  the shared space. `MapDocumentsPurgeEndpoint` is removed.
+- **Breaking:** access to each loaded document is asked through ASP.NET Core resource authorization
   (`AuthorizeResourceAsync`), refusal by default. A host answers it with an
   `AuthorizationHandler<Operation, Document>`, or declares `AllowAnyResource()`.
+- **Breaking:** `AddStellaegisDocumentsClient` no longer takes a holder path, and
+  `DocumentsClientOptions.BaseUrl` is replaced by `CompartmentUrl` and `SharedUrl`.
+- **Breaking:** the `BlobSpace` option becomes `BlobName` (`Stellaegis:Documents:BlobName`).
 - Errors are translated by Stellaegis.Primitives.AspNetCore: an unexpected failure answers `500`
   instead of `422`, and the error code travels in the `code` extension of the problem details.
+- Depends on Stellaegis.Primitives 2.0.0, Stellaegis.Blobs 2.0.1 and Microsoft.Extensions 10.0.13.
 
 ### Removed
 
+- `DocumentsHolderPath`.
 - `IDocumentAccessPolicy`, `AllowAllDocumentAccessPolicy`, `DocumentAccessRequest` and
   `DocumentAction`, replaced by resource authorization.
 - `IDocumentService.TryGetContentUrlAsync`, and the redirect of `GET documents/{id}/content` to a
   pre-signed URL: content is always streamed by the endpoints.
+
+### Updating from 1.0.0
+
+- Pass a `Space` where you passed a holder: a `Compartment`, such as `Compartment.Parse("acme")`, which
+  converts implicitly, or `Space.Shared` where you passed the empty holder. Pass an `Actor`, such as
+  `Actor.Parse(userId)`, where you passed an actor string.
+- Recreate the `doc` schema from `docs/sql/stellaegis_documents.sql`. No migration script is provided.
+- With `FileSystemBlobStore`, move the content as the changelog of Stellaegis.Blobs 2.0.0 describes, and
+  rename `BlobSpace` to `BlobName` in your configuration.
+- Register a request context, such as `AddStellaegisRequestContext(c => c.CompartmentFromRoute("org"))`,
+  call `MapDocumentsEndpoints()` without a resolver, and map a second group marked `InSharedSpace()` if
+  you serve shared documents.
+- Attach your policies per operation, and register an `AuthorizationHandler<Operation, Document>` or
+  declare `AllowAnyResource()`.
+- Configure the client with `CompartmentUrl` and `SharedUrl` instead of `BaseUrl` and a holder path.
 
 ## [1.0.0] — 2026-10-13
 
@@ -54,4 +103,5 @@ First release as a standalone library.
   requests; uploads stream from the request and may carry a `Content-Digest`.
 - `Stellaegis.Documents.Client`: `IDocumentService` over HTTP, which sends and checks digests.
 
+[2.0.0]: https://github.com/Stellaegis/Stellaegis.Documents/releases/tag/v2.0.0
 [1.0.0]: https://github.com/Stellaegis/Stellaegis.Documents/releases/tag/v1.0.0

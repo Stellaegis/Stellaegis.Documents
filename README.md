@@ -3,8 +3,9 @@
 Stellaegis.Documents is a .NET library that keeps documents for an application: it stores each
 document's content, keeps its versions when you ask for them, and records what identifies the
 document — its type, file name, media type, length and SHA-256 digest. It partitions documents by
-**holder**, the party a document belongs to, so one deployment can serve many customers without one
-of them ever reaching another's documents. Content is stored through
+**compartment**, the party a document belongs to, so one deployment can serve many customers without
+one of them ever reaching another's documents. Documents that belong to no compartment live in a
+**shared space**. Content is stored through
 [Stellaegis.Blobs](https://github.com/Stellaegis/Stellaegis.Blobs), on whatever storage its adapter
 targets.
 
@@ -28,9 +29,9 @@ means to your application.
 | The library keeps | Your application keeps |
 | --- | --- |
 | identity: a public GUID, stable across versions | what the document is about: tags, statuses, classification |
-| the holder, the document type, file name, media type, length, digest | search, built from the events the library publishes |
+| the space, the document type, file name, media type, length, digest | search, built from the events the library publishes |
 | the versions of a versioned document | the links between your objects and the documents, by GUID |
-| the content, through Stellaegis.Blobs | fine-grained authorization, through a hook you implement |
+| the content, through Stellaegis.Blobs | fine-grained authorization, through an authorization handler you write |
 
 A typical application stores the document's GUID next to its own data — an invoice row holding the
 GUID of its PDF — and asks the library for the content when it needs it. Your database knows only the
@@ -41,19 +42,31 @@ two applications sharing the library can organize documents differently. In retu
 answer a question such as "the invoices of this customer for March": your application answers it from
 its own data. The library publishes an event on every change so that you can keep such a projection.
 
-## Holders
+## Compartments and the shared space
 
-Every operation names its holder: `CreateAsync(holder, …)`, `OpenContentAsync(holder, id)` and so on.
-A document of another holder behaves exactly as an absent one, on every path, versions included.
+Every operation names the **space** it acts in: `CreateAsync(space, …)`, `OpenContentAsync(space, id)` and
+so on. The `Space` type comes from
+[Stellaegis.Primitives](https://github.com/Stellaegis/Stellaegis.Primitives), and a space is one of two
+things:
 
-- A holder starts with a lowercase letter, followed by 2 to 62 lowercase letters, digits or single
-  hyphens, the grammar of a Stellaegis.Blobs location: `acme`, `customer-42`.
-- The empty string designates the platform: documents that belong to the application itself rather
-  than to one of its holders.
-- An application that does not partition its documents can use the empty holder everywhere.
+- **A compartment**, the `Compartment` type: a customer, an organization, a user. Its identifier has 3 to
+  63 characters: a lowercase letter first, then lowercase letters, digits and single hyphens, ending with a
+  letter or a digit, such as `acme` or `customer-42`. A `Compartment` converts implicitly to its space, so
+  you can pass one wherever a space is expected.
+- **The shared space**, `Space.Shared`: the documents that belong to no compartment, such as templates
+  that every customer uses.
 
-The library trusts the holder it receives. Your code must take it from a source it controls — the
-authenticated caller, a route value it has authorized — and never pass on a holder a user typed.
+A document of another space behaves exactly as an absent one, on every path, versions included. A
+compartment never reaches the shared space, and the shared space never reaches a compartment.
+
+An application that does not partition its documents uses a single compartment of its choosing, such as
+`Compartment.Parse("main")`, everywhere.
+
+The library trusts the space it receives. Your code must take it from a source it controls — the
+authenticated caller, a route value it has authorized — and never pass on a compartment a user typed.
+
+Who performed a change is recorded as an `Actor`, the other type of Stellaegis.Primitives the library
+takes: a user identifier, a client identifier, or the name a scheduled task gives itself.
 
 ## Getting started in process
 
@@ -98,14 +111,16 @@ builder.Services.AddStellaegisDocumentsPostgreSQL(builder.Configuration);
 `IDocumentService` is then available from dependency injection:
 
 ```csharp
+var acme = Compartment.Parse("acme");
+
 var document = await documents.CreateAsync(
-    holder: "acme",
+    space: acme,
     documentType: "invoice",
     new DocumentUpload { Content = stream, FileName = "Invoice 2026-001.pdf", ContentType = "application/pdf" },
-    actor: userId,
+    actor: Actor.Parse(userId),
     isVersioned: false);
 
-await using var content = await documents.OpenContentAsync("acme", document.DocumentUniqueId);
+await using var content = await documents.OpenContentAsync(acme, document.DocumentUniqueId);
 ```
 
 For development and tests, `AddStellaegisDocumentsInMemory(configuration)` registers a store that
@@ -140,8 +155,9 @@ contract is.
 
 ### Storage layout
 
-Content is stored flat: one blob per content, in the holder's space, under the key
-`{document GUID}-{content number}`. The library stores no key: it derives each key from the document's
+Content is stored flat: one blob per content, under the name `BlobName` of the document's compartment, or
+of the shared space, with the key `{document GUID}-{content number}`. Stellaegis.Blobs keeps the shared
+space apart from every compartment. The library stores no key: it derives each key from the document's
 identity. Moving the content to another storage therefore needs no change in the database.
 
 ### Trash and purge
@@ -149,14 +165,15 @@ identity. Moving the content to another storage therefore needs no change in the
 `TrashAsync` marks a document as trashed. It leaves the list and can no longer change; its content
 stays.
 
-`PurgeHolderAsync(holder)` deletes every document of a holder for good, whatever its status: content
-first, then the index, in batches of a hundred. A purge cut halfway resumes when called again. It
-refuses the empty holder, so the platform's documents are never purged this way.
+`PurgeCompartmentAsync(compartment)` deletes every document of a compartment for good, whatever its
+status: content first, then the index, in batches of a hundred. A purge cut halfway resumes when called
+again. It takes a `Compartment`, so the shared space cannot be purged this way: its trashed documents
+stay.
 
 The library performs the purge; it does not decide when. Confirmations ("type the customer's name to
 confirm") and any retention period before the final deletion belong to the part of your application
-that manages the holder's life — closing a customer account, for example — which calls the purge once
-they are through.
+that manages the compartment's life — closing a customer account, for example — which calls the purge
+once they are through.
 
 ## Streaming and integrity
 
@@ -186,31 +203,57 @@ dotnet add package Stellaegis.Documents.AspNetCore
 ```
 
 ```csharp
+builder.Services.AddStellaegisRequestContext(c => c.CompartmentFromRoute("org"));
+
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGroup("/api/t/{holder}")
-   .MapDocumentsEndpoints(resolveHolder: http => http.GetRouteValue("holder") as string)
+app.MapGroup("/api/orgs/{org}").MapDocumentsEndpoints()
    .RequireAuthorizationPerOperation(op => op.ToString());   // "documents.read", "documents.purge"…
 ```
 
-The endpoints are mapped under `documents` on the builder you pass, so the URL prefix is yours:
-`/api/t/{holder}` above, a holder taken from a claim of the caller's token, or no holder at all.
-`resolveHolder` gives the holder of each request, or `null` to answer `404`. Since a holder read from
-the URL is user input, this function is where your host checks that the caller has rights on that
-holder.
+The endpoints are mapped under `documents` on the builder you pass, so the URL prefix is yours.
+
+**The space and the actor of a request** come from the request context of
+[Stellaegis.Primitives.AspNetCore](https://github.com/Stellaegis/Stellaegis.Primitives), which your host
+registers with `AddStellaegisRequestContext`. You choose where the compartment is read: a route value as
+above, a claim of the caller's token, a single compartment for the whole application, or a source of your
+own. A compartment that cannot be resolved — a missing or invalid route value, for instance — answers
+`404`. Since a compartment read from the URL is user input, your security is where the host checks that
+the caller has rights on it. The actor is read from the caller's claims, and a request without an
+authenticated user is recorded as `anonymous`; whether a route requires an authenticated user is decided
+by your policies. Startup fails when the module is mapped without a request context registered.
+
+**The shared space** is reached by mapping the endpoints a second time, on a group you mark
+`InSharedSpace()`:
+
+```csharp
+app.MapGroup("/api/shared").MapDocumentsEndpoints().InSharedSpace()
+   .RequireAuthorizationPerOperation(op => $"shared.{op}");
+```
+
+On a marked group the space is the shared space, and the compartment is not read. A group without the
+mark never reaches the shared space; if you map none, shared documents are not reachable over HTTP at all.
+The cost of this choice is a second mapping, with its own URL and its own policies. In return, nothing
+reaches the shared space by accident: a missing compartment answers `404`, and it never falls back to the
+shared space.
+
+**Route names.** The endpoints carry no route name, because ASP.NET Core requires names to be unique across
+a host, and the module is mapped once per space. A host that wants names — to generate links, or as
+operation identifiers in an OpenAPI document — sets them on the returned group from each route's
+operation.
 
 | Request | Operation | Effect |
 | --- | --- | --- |
 | `POST documents` | `create` | creates a document from a `multipart/form-data` body |
-| `GET documents?continuationToken=…` | `list` | one page of the holder's active documents |
+| `GET documents?continuationToken=…` | `list` | one page of the active documents of the space |
 | `GET documents/{id}` | `read` | a document's metadata |
 | `PUT documents/{id}/content` | `replace-content` | replaces its content (multipart body, `file` part only) |
 | `GET documents/{id}/content` | `read-content` | its current content |
 | `GET documents/{id}/versions` | `list-versions` | its versions |
 | `GET documents/{id}/versions/{n}/content` | `read-version-content` | the content of version `n` |
 | `DELETE documents/{id}` | `trash` | moves it to the trash |
-| `DELETE documents` | `purge` | deletes every document of the holder for good, and answers how many |
+| `DELETE documents` | `purge` | deletes every document of the compartment for good, and answers how many; `404` in the shared space |
 
 An upload is a multipart body with a `documentType` field, an optional `isVersioned` field, then a
 `file` part, which may carry a `Content-Digest` header. **The fields come before the `file` part.** The
@@ -225,9 +268,9 @@ Your host's request size limit applies: 30 MB by default under Kestrel. For larg
 Everything else about the host belongs to you: authentication schemes, the policies themselves, CORS,
 rate limiting, forwarded headers, health checks.
 
-**Answers.** A caller without a `sub` claim (or name identifier) answers `401`; the library records it
-as the actor of every change. An absent document, a document of another holder, and a document your
-authorization refuses all answer `404`, so a caller cannot probe which documents exist. Errors are
+**Answers.** An absent document, a document of another space, and a document your authorization refuses
+all answer `404`, so a caller cannot probe which documents exist. A `401` or a `403` comes from your
+policies, never from the endpoints themselves. Errors are
 answered as problem responses (RFC 9457) by the translation of
 [Stellaegis.Primitives.AspNetCore](https://github.com/Stellaegis/Stellaegis.Primitives): invalid input
 answers `400`, an unexpected failure `500`.
@@ -256,7 +299,7 @@ one.
 
 ### Per-document authorization
 
-The policies decide whether a caller may use an operation for a holder. Whether the caller may reach
+The policies decide whether a caller may use an operation in a space. Whether the caller may reach
 *this* document is a second question, which the endpoints ask on every document they load, items of a
 list included: they call `AuthorizeResourceAsync`, with the route's operation as the requirement and
 the `Document` as the resource. A refusal answers `404`, and a refused document is left out of a list.
@@ -279,12 +322,12 @@ public sealed class DocumentAuthorizationHandler : AuthorizationHandler<Operatio
 builder.Services.AddSingleton<IAuthorizationHandler, DocumentAuthorizationHandler>();
 ```
 
-**Refusal is the default.** Without a handler, every document is refused. A host in which every caller
-allowed by the policies may reach every document of the holder declares it on the group, as it would
-declare `[AllowAnonymous]`:
+**Refusal is the default.** Without a handler, every document is refused, and startup fails with a
+message that names the routes and the way out. A host in which every caller allowed by the policies may
+reach every document of the space declares it on the group, as it would declare `[AllowAnonymous]`:
 
 ```csharp
-app.MapGroup("/api/t/{holder}").MapDocumentsEndpoints(resolveHolder).AllowAnyResource();
+app.MapGroup("/api/orgs/{org}").MapDocumentsEndpoints().AllowAnyResource();
 ```
 
 ### Reaching the endpoints from another process
@@ -295,18 +338,37 @@ dotnet add package Stellaegis.Documents.Client
 
 ```csharp
 builder.Services
-    .AddStellaegisDocumentsClient(builder.Configuration, holderPath: holder => $"t/{holder}/")
+    .AddStellaegisDocumentsClient(builder.Configuration)
     .AddHttpMessageHandler<MyTokenHandler>();
 ```
 
 ```json
-{ "Stellaegis": { "Documents": { "Client": { "BaseUrl": "https://documents.example.com/api/" } } } }
+{
+  "Stellaegis": {
+    "Documents": {
+      "Client": {
+        "CompartmentUrl": "https://documents.example.com/api/orgs/{compartment}/",
+        "SharedUrl": "https://documents.example.com/api/shared/"
+      }
+    }
+  }
+}
 ```
 
 The client registers `IDocumentService`, so code written against the in-process service runs
-unchanged. `holderPath` gives the path under which the host maps a holder's endpoints; without it, the
-holder is not part of the URL. The client sends requests as they are: add a handler to the returned
-builder to attach your token.
+unchanged. It sends requests as they are: add a handler to the returned builder to attach your token.
+
+The two URLs are the two groups your host maps, and the client deduces neither from the other:
+
+- `CompartmentUrl` serves the calls in a compartment. `{compartment}` is replaced by the compartment of each
+  call. Without the placeholder, every compartment goes to the same URL, for a host that resolves the
+  compartment some other way, such as from the token.
+- `SharedUrl` serves the calls in the shared space.
+
+Either may be left out. A call in a space whose URL is missing throws an `InvalidOperationException`, and
+never goes to the other URL. A client configured with neither fails when it is resolved. Both URLs go
+through the same `HttpClient` and its handlers: if your host authenticates the shared space differently,
+your handler tells the two apart by the request URL.
 
 Two differences with the in-process service follow from the protocol:
 
@@ -333,7 +395,10 @@ short-lived download URLs.
 The library publishes `DocumentIndexedEvent` when a document is created or its content changes, and
 `DocumentTrashedEvent` when it is trashed, through the `IEventPublisher` port of
 [Stellaegis.Primitives](https://github.com/Stellaegis/Stellaegis.Primitives). Each event carries the
-holder, the document's GUID and what identifies it, never its file name.
+document's GUID and what identifies it, never its file name, and its space as two fields: `Compartment`,
+and `IsShared`, true when the document belongs to the shared space, whose `Compartment` is then `null`.
+The `Space` type has no serialized form, and your transport may serialize the events; the two fields
+travel as they are. Rebuild the space with `e.IsShared ? Space.Shared : Space.Of(e.Compartment)`.
 
 Register your own `IEventPublisher` to send them to your message transport; without one, the events
 are dropped. A publisher does not throw on a transport failure: the change is stored, and publication
