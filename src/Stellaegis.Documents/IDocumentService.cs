@@ -60,10 +60,16 @@ public interface IDocumentService
     /// every version, then metadata. Irreversible. The shared space has no such purge.
     /// </summary>
     /// <remarks>
-    /// Confirmations and any retention delay belong to whoever manages the compartment's life, which calls
-    /// this once they are through. The call can be replayed: an interrupted purge leaves the metadata of the
-    /// documents it did not finish, and the next call completes them.
+    /// An act of administration on the compartment, not an operation within it: over HTTP it is mapped apart,
+    /// by <c>MapDocumentsAdminEndpoints</c>. Confirmations and any retention delay belong to whoever manages the
+    /// compartment's life, which calls this once they are through. The call can be replayed: an interrupted
+    /// purge leaves the metadata of the documents it did not finish, and the next call completes them; a
+    /// complete one deletes nothing more. No event is published: the purge and its <paramref name="actor"/>
+    /// are logged, when it starts and when it ends.
     /// </remarks>
+    /// <param name="compartment">The compartment to empty.</param>
+    /// <param name="actor">Who purges — the administrator, or a task named after itself, such as <c>job:purge</c>.</param>
+    /// <param name="cancellationToken">Cancels the purge; what is deleted stays deleted.</param>
     /// <returns>The number of documents deleted.</returns>
-    Task<int> PurgeCompartmentAsync(Compartment compartment, CancellationToken cancellationToken = default);
+    Task<int> PurgeCompartmentAsync(Compartment compartment, Actor actor, CancellationToken cancellationToken = default);
 }

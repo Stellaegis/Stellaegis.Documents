@@ -289,11 +289,11 @@ public sealed class DocumentServiceTests
         await harness.Documents.TrashAsync(compartment, trashed.DocumentUniqueId, Alice, Ct);
         var kept = await harness.Documents.CreateAsync(NewCompartment(), "invoice", Upload("other"), Alice, cancellationToken: Ct);
 
-        Assert.Equal(2, await harness.Documents.PurgeCompartmentAsync(compartment, Ct));
+        Assert.Equal(2, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
 
         Assert.Null(await harness.Documents.GetAsync(compartment, versioned.DocumentUniqueId, Ct));
         Assert.Equal([$"{kept.DocumentUniqueId:N}-1"], harness.BlobNames());
-        Assert.Equal(0, await harness.Documents.PurgeCompartmentAsync(compartment, Ct));
+        Assert.Equal(0, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
     }
 
     [Fact]
@@ -304,7 +304,7 @@ public sealed class DocumentServiceTests
         for (var i = 0; i < 230; i++)
             await harness.Documents.CreateAsync(compartment, "note", Upload($"n{i}"), Alice, cancellationToken: Ct);
 
-        Assert.Equal(230, await harness.Documents.PurgeCompartmentAsync(compartment, Ct));
+        Assert.Equal(230, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
         Assert.Empty(harness.BlobNames());
     }
 
@@ -316,7 +316,7 @@ public sealed class DocumentServiceTests
         await harness.Documents.CreateAsync(compartment, "invoice", Upload("hello"), Alice, cancellationToken: Ct);
         var shared = await harness.Documents.CreateAsync(Space.Shared, "logo", Upload("svg"), Alice, cancellationToken: Ct);
 
-        Assert.Equal(1, await harness.Documents.PurgeCompartmentAsync(compartment, Ct));
+        Assert.Equal(1, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
 
         Assert.NotNull(await harness.Documents.GetAsync(Space.Shared, shared.DocumentUniqueId, Ct));
         Assert.Equal([$"{shared.DocumentUniqueId:N}-1"], harness.BlobNames());

@@ -101,6 +101,9 @@ internal static class Content
     /// <inheritdoc cref="Alice"/>
     public static Actor Mallory { get; } = Actor.Parse("mallory");
 
+    /// <summary>The task that purges compartments, acting under its own name.</summary>
+    public static Actor Purger { get; } = Actor.Parse("job:purge");
+
     /// <summary>A text content to upload.</summary>
     public static DocumentUpload Upload(string text, string fileName = "file.txt", string contentType = "text/plain", string? expectedHash = null)
         => new()

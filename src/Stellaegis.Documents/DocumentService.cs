@@ -180,9 +180,13 @@ internal sealed class DocumentService(
             cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<int> PurgeCompartmentAsync(Compartment compartment, CancellationToken cancellationToken = default)
+    public async Task<int> PurgeCompartmentAsync(Compartment compartment, Actor actor, CancellationToken cancellationToken = default)
     {
         Space space = Guard.NotNull(compartment);
+        Guard.NotNull(actor);
+
+        // Logged before anything is deleted: an interrupted purge still names its author.
+        _logger.LogInformation("Purging the documents of compartment {Compartment}, by {Actor}.", compartment, actor);
 
         // Batches keep memory bounded. Deleted documents leave the next query, so no position is kept:
         // the purge takes what remains until nothing does.
@@ -206,7 +210,7 @@ internal sealed class DocumentService(
         }
         while (batch.Count == PurgeBatchSize);
 
-        _logger.LogInformation("Purged {DocumentCount} documents of compartment {Compartment}.", purged.Count, compartment);
+        _logger.LogInformation("Purged {DocumentCount} documents of compartment {Compartment}, by {Actor}.", purged.Count, compartment, actor);
         return purged.Count;
     }
 

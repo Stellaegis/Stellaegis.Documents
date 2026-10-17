@@ -26,9 +26,6 @@ namespace Stellaegis.Documents.AspNetCore;
 ///   <item><c>GET documents/{id}/versions</c> (<c>list-versions</c>) and
 ///   <c>GET documents/{id}/versions/{n}/content</c> (<c>read-version-content</c>) — its history</item>
 ///   <item><c>DELETE documents/{id}</c> (<c>trash</c>) — move it to the trash</item>
-///   <item><c>DELETE documents</c> (<c>purge</c>) — delete every document of the compartment for good
-///   (<see cref="IDocumentService.PurgeCompartmentAsync"/>), answering how many were deleted; <c>404</c> in the
-///   shared space, which has no purge</item>
 ///   <item>a streamed content carries its SHA-256 as <c>Repr-Digest</c> (RFC 9530) and as a strong <c>ETag</c>,
 ///   and answers <c>Range</c> requests, so an interrupted download resumes; the <c>file</c> part of an upload
 ///   may carry a <c>Content-Digest</c>, and content that does not match it is refused with <c>400</c></item>
@@ -56,6 +53,11 @@ namespace Stellaegis.Documents.AspNetCore;
 /// names — for links or an OpenAPI document — sets them from each route's operation.
 /// </para>
 /// <para>
+/// The purge of a compartment is an act of administration on the compartment, not an operation within it:
+/// <see cref="MapDocumentsAdminEndpoints"/> maps it apart, on a group the host secures for its administrators.
+/// A host that does not map it has no purge.
+/// </para>
+/// <para>
 /// Everything else about the host — authentication schemes, the policies themselves, CORS, rate limiting,
 /// forwarded headers, health checks — is the caller's to configure.
 /// </para>
@@ -73,9 +75,11 @@ namespace Stellaegis.Documents.AspNetCore;
 /// app.UseAuthentication();
 /// app.UseAuthorization();
 /// app.MapGroup("/api/orgs/{org}").MapDocumentsEndpoints()
-///    .RequireAuthorizationPerOperation(op => op.ToString());   // "documents.read", "documents.purge"…
+///    .RequireAuthorizationPerOperation(op => op.ToString());   // "documents.read", "documents.trash"…
 /// app.MapGroup("/api/shared").MapDocumentsEndpoints().InSharedSpace()
 ///    .RequireAuthorizationPerOperation(op => $"shared.{op}");
+/// app.MapGroup("/api/admin").MapDocumentsAdminEndpoints()
+///    .RequireAuthorization("platform-admin");
 /// </code>
 /// </example>
 public static class EndpointRouteBuilderExtensions
@@ -208,13 +212,40 @@ public static class EndpointRouteBuilderExtensions
             .WithMetadata(DocumentOperations.Trash)
             .Produces(StatusCodes.Status204NoContent);
 
-        group.MapDelete("/", async (IRequestContext context, IDocumentService documents, CancellationToken ct) =>
+        return group;
+    }
+
+    /// <summary>
+    /// Maps the administration endpoints of the module, labelled with their operation from
+    /// <see cref="DocumentOperations"/> and none secured: the host attaches its security to the returned group.
+    /// </summary>
+    /// <remarks>
+    /// <para>The compartment is the object of these endpoints, not their context: it is a segment of the path,
+    /// and the request context gives only the actor.</para>
+    /// <list type="bullet">
+    ///   <item><c>DELETE documents/compartments/{compartment}</c> (<c>purge</c>) — delete every document of the
+    ///   compartment for good (<see cref="IDocumentService.PurgeCompartmentAsync"/>), answering how many were
+    ///   deleted. A replayed purge completes an interrupted one, and answers <c>0</c> once nothing is left.
+    ///   <c>404</c> for a value that is not a compartment: the shared space has no purge</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="endpoints">The builder to map the endpoints on — the application, or a route group.</param>
+    /// <returns>The group holding the endpoints, for the host's security and further conventions.</returns>
+    public static RouteGroupBuilder MapDocumentsAdminEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        Guard.NotNull(endpoints);
+
+        var group = endpoints.MapGroup("documents")
+            .BelongsTo<DocumentsModule>()
+            .RequireRequestContext();
+        group.AddErrorTranslation();
+
+        group.MapDelete("/compartments/{compartment}", async (string compartment, IRequestContext context, IDocumentService documents, CancellationToken ct) =>
             {
-                // An unresolved space, or the shared space, which has no purge.
-                if (context.Space?.Compartment is not { } compartment)
+                if (!Compartment.TryParse(compartment, out var target))
                     return Results.NotFound();
 
-                var purged = await documents.PurgeCompartmentAsync(compartment, ct);
+                var purged = await documents.PurgeCompartmentAsync(target, context.Actor, ct);
                 return Results.Ok(new { purged });
             })
             .WithMetadata(DocumentOperations.Purge);

@@ -165,10 +165,13 @@ identity. Moving the content to another storage therefore needs no change in the
 `TrashAsync` marks a document as trashed. It leaves the list and can no longer change; its content
 stays.
 
-`PurgeCompartmentAsync(compartment)` deletes every document of a compartment for good, whatever its
+`PurgeCompartmentAsync(compartment, actor)` deletes every document of a compartment for good, whatever its
 status: content first, then the index, in batches of a hundred. A purge cut halfway resumes when called
-again. It takes a `Compartment`, so the shared space cannot be purged this way: its trashed documents
-stay.
+again, and a complete one deletes nothing more. It takes a `Compartment`, so the shared space cannot be
+purged this way: its trashed documents stay.
+
+The purge publishes no event. It logs its actor when it starts and when it ends, so an interrupted purge
+still names its author. A task that purges on a schedule acts under its own name, such as `job:purge`.
 
 The library performs the purge; it does not decide when. Confirmations ("type the customer's name to
 confirm") and any retention period before the final deletion belong to the part of your application
@@ -209,7 +212,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGroup("/api/orgs/{org}").MapDocumentsEndpoints()
-   .RequireAuthorizationPerOperation(op => op.ToString());   // "documents.read", "documents.purge"…
+   .RequireAuthorizationPerOperation(op => op.ToString());   // "documents.read", "documents.trash"…
 ```
 
 The endpoints are mapped under `documents` on the builder you pass, so the URL prefix is yours.
@@ -253,13 +256,26 @@ operation.
 | `GET documents/{id}/versions` | `list-versions` | its versions |
 | `GET documents/{id}/versions/{n}/content` | `read-version-content` | the content of version `n` |
 | `DELETE documents/{id}` | `trash` | moves it to the trash |
-| `DELETE documents` | `purge` | deletes every document of the compartment for good, and answers how many; `404` in the shared space |
 
 An upload is a multipart body with a `documentType` field, an optional `isVersioned` field, then a
 `file` part, which may carry a `Content-Digest` header. **The fields come before the `file` part.** The
 endpoints read the request as it arrives and hand the file part to the library while it streams in,
 without buffering it in memory or on disk; a part that has gone by cannot be read again. A request
 that sends the file first answers `400` and says so.
+
+**Administration.** The purge of a compartment acts on the compartment, not within it, so it is mapped
+apart, on a group you secure for your administrators. The compartment is a segment of its path, and the
+request context gives only the actor. A host that does not map it has no purge: in an application with a
+single compartment, a purge in the main mapping would empty the whole application for anyone the group's
+policy admits.
+
+```csharp
+app.MapGroup("/api/admin").MapDocumentsAdminEndpoints().RequireAuthorization("platform-admin");
+```
+
+| Request | Operation | Effect |
+| --- | --- | --- |
+| `DELETE documents/compartments/{compartment}` | `purge` | deletes every document of the compartment for good, and answers how many; `404` for a value that is not a compartment, the shared space included |
 
 Your host's request size limit applies: 30 MB by default under Kestrel. For larger documents, raise
 `KestrelServerOptions.Limits.MaxRequestBodySize`, or the limit of a single request through
@@ -278,24 +294,17 @@ answers `400`, an unexpected failure `500`.
 ### Securing the endpoints
 
 The library attaches no security to its routes. Each route carries an **operation** as metadata — the
-`Operation` type of Stellaegis.Primitives.AspNetCore, with a module (`documents`), a name and a kind —
+`Operation` type of Stellaegis.Primitives.AspNetCore, with a target (`documents`), a name and a kind —
 and you decide, per operation, which policy a caller must satisfy. `DocumentOperations` lists them.
 
 `RequireAuthorizationPerOperation` receives each operation and returns the name of the policy to
 require. The operation's **name** is the key: one policy per operation, `op.ToString()` giving
-`documents.read`, `documents.purge` and so on, or any grouping of names you prefer. The **kind**
+`documents.read`, `documents.trash` and so on, or any grouping of names you prefer. The **kind**
 (`Read`, `Write`, `Delete`) follows the HTTP verb and says nothing of who may perform an operation.
 
-**The purge is one route among the others**, the `purge` operation, of kind `Delete` like the trash.
-Its consequence is worth weighing before you choose your policies:
-
-- a policy chosen per operation name keeps the purge apart: `documents.purge` can require an
-  administrator while `documents.trash` requires a member;
-- a single policy on the whole group, or a policy chosen per kind, opens the purge to everyone who may
-  trash a document. Choose it knowingly, or answer `documents.purge` with a policy of its own.
-
-A route your mapping leaves without a policy falls to the fallback policy of your host, when it sets
-one.
+Startup fails when a route is left without an authorization requirement or `AllowAnonymous()`, naming the
+routes: a fallback policy does not count, since it does not know the operation. A host that secures the
+whole group with one policy declares it, `RequireAuthorization("member")`.
 
 ### Per-document authorization
 
@@ -348,7 +357,8 @@ builder.Services
     "Documents": {
       "Client": {
         "CompartmentUrl": "https://documents.example.com/api/orgs/{compartment}/",
-        "SharedUrl": "https://documents.example.com/api/shared/"
+        "SharedUrl": "https://documents.example.com/api/shared/",
+        "AdminUrl": "https://documents.example.com/api/admin/"
       }
     }
   }
@@ -358,17 +368,18 @@ builder.Services
 The client registers `IDocumentService`, so code written against the in-process service runs
 unchanged. It sends requests as they are: add a handler to the returned builder to attach your token.
 
-The two URLs are the two groups your host maps, and the client deduces neither from the other:
+The URLs are the groups your host maps, and the client deduces none from another:
 
 - `CompartmentUrl` serves the calls in a compartment. `{compartment}` is replaced by the compartment of each
   call. Without the placeholder, every compartment goes to the same URL, for a host that resolves the
   compartment some other way, such as from the token.
 - `SharedUrl` serves the calls in the shared space.
+- `AdminUrl` serves the purge.
 
-Either may be left out. A call in a space whose URL is missing throws an `InvalidOperationException`, and
-never goes to the other URL. A client configured with neither fails when it is resolved. Both URLs go
-through the same `HttpClient` and its handlers: if your host authenticates the shared space differently,
-your handler tells the two apart by the request URL.
+Any may be left out. A call whose URL is missing throws an `InvalidOperationException`, and never goes to
+another URL. A client configured with none fails when it is resolved. The URLs go through the same
+`HttpClient` and its handlers: if your host authenticates the shared space or the administration
+differently, your handler tells them apart by the request URL.
 
 Two differences with the in-process service follow from the protocol:
 

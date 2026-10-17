@@ -188,7 +188,7 @@ public sealed class DocumentsApiTests(DocumentsHost host) : IClassFixture<Docume
             .Where(e => e.RoutePattern.RawText!.StartsWith("/api/t/", StringComparison.Ordinal))
             .Select(e => e.GetOperation()).ToList();
 
-        Assert.Equal(9, operations.Count);
+        Assert.Equal(8, operations.Count);
         Assert.DoesNotContain(null, operations);
         Assert.Equal(operations.Count, operations.Distinct().Count());
         Assert.All(operations, op => Assert.Equal(DocumentOperations.Target, op!.Target));
@@ -197,7 +197,7 @@ public sealed class DocumentsApiTests(DocumentsHost host) : IClassFixture<Docume
     [Fact]
     public void The_routes_carry_no_name_so_the_module_maps_twice()
     {
-        Assert.Equal(18, host.Endpoints.Count);
+        Assert.Equal(17, host.Endpoints.Count);
         Assert.All(host.Endpoints, e => Assert.Null(e.Metadata.GetMetadata<IEndpointNameMetadata>()));
     }
 
@@ -225,23 +225,31 @@ public sealed class DocumentsApiTests(DocumentsHost host) : IClassFixture<Docume
     }
 
     [Fact]
+    public void The_purge_is_only_in_the_administration_mapping()
+    {
+        var purges = host.Endpoints.Where(e => e.GetOperation() == DocumentOperations.Purge).ToList();
+
+        Assert.Equal(["/api/admin/documents/compartments/{compartment}"], purges.Select(e => e.RoutePattern.RawText));
+    }
+
+    [Fact]
     public async Task The_shared_space_has_no_purge()
     {
         var created = await host.Http("alice").PostAsync("/api/shared/documents", Form("logo"), Ct);
         var shared = (await created.Content.ReadFromJsonAsync<DocumentResponse>(Ct))!;
 
-        Assert.Equal(HttpStatusCode.NotFound, (await host.Http("ops", "admin").DeleteAsync("/api/shared/documents", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await host.Http("ops", "admin").DeleteAsync("/api/admin/documents/compartments/_shared", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await host.Http("alice").GetAsync($"/api/shared/documents/{shared.DocumentUniqueId}", Ct)).StatusCode);
     }
 
     [Fact]
-    public async Task The_purge_requires_its_own_policy()
+    public async Task The_purge_requires_the_policy_of_the_administration_mapping()
     {
         var alice = host.Http("alice");
         var (compartment, _) = await CreateAsync(alice);
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await alice.DeleteAsync($"/api/t/{compartment}/documents", Ct)).StatusCode);
-        var purge = await host.Http("ops", "admin").DeleteAsync($"/api/t/{compartment}/documents", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, (await alice.DeleteAsync($"/api/admin/documents/compartments/{compartment}", Ct)).StatusCode);
+        var purge = await host.Http("ops", "admin").DeleteAsync($"/api/admin/documents/compartments/{compartment}", Ct);
 
         Assert.Equal(HttpStatusCode.OK, purge.StatusCode);
         Assert.Contains("\"purged\":1", await purge.Content.ReadAsStringAsync(Ct));

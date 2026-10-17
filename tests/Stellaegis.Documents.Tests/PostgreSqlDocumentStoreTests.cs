@@ -123,7 +123,7 @@ public sealed class PostgreSqlDocumentStoreTests(PostgreSqlFixture database) : I
         var trashed = await harness.Documents.CreateAsync(compartment, "memo", Upload("m"), Alice, cancellationToken: Ct);
         await harness.Documents.TrashAsync(compartment, trashed.DocumentUniqueId, Alice, Ct);
 
-        Assert.Equal(2, await harness.Documents.PurgeCompartmentAsync(compartment, Ct));
+        Assert.Equal(2, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
 
         await using var connection = new NpgsqlConnection(database.ConnectionString);
         await connection.OpenAsync(Ct);

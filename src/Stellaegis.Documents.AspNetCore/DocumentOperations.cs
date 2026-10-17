@@ -37,6 +37,9 @@ public static class DocumentOperations
     /// <summary><c>DELETE documents/{id}</c>: moves a document to the trash.</summary>
     public static readonly Operation Trash = new(Target, "trash", OperationKind.Delete);
 
-    /// <summary><c>DELETE documents</c>: deletes every document of the compartment for good.</summary>
+    /// <summary>
+    /// <c>DELETE documents/compartments/{compartment}</c>, mapped by <c>MapDocumentsAdminEndpoints</c>: deletes every
+    /// document of a compartment for good.
+    /// </summary>
     public static readonly Operation Purge = new(Target, "purge", OperationKind.Delete);
 }

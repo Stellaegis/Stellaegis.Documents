@@ -13,8 +13,20 @@ Built on Stellaegis.Primitives 3.0.0 and Stellaegis.Blobs 3.0.0.
 
 - `DocumentsModule`, the identity of the module (`IStellaegisModule`): the routes of `MapDocumentsEndpoints`
   belong to it.
+- `MapDocumentsAdminEndpoints`, the administration of the module, mapped apart on a group the host secures for
+  its administrators. It holds the purge: `DELETE documents/compartments/{compartment}`, the compartment being
+  the object of the route rather than its context. `404` for a value that is not a compartment.
+- `DocumentsClientOptions.AdminUrl`, where the client sends a purge. A purge without it throws an
+  `InvalidOperationException`; a client configured with none of the three URLs fails when it is resolved.
 
 ### Changed
+
+- **Breaking:** the purge leaves `MapDocumentsEndpoints`, and `DELETE documents` no longer exists: in an
+  application with a single compartment, one policy on the group opened the emptying of the whole application
+  to any user it admitted. Map `MapDocumentsAdminEndpoints` to keep a purge over HTTP.
+- **Breaking:** `PurgeCompartmentAsync(compartment, actor)` takes the actor who purges, logged when the purge
+  starts and when it ends. No event is published. Over HTTP the server takes the actor from the request
+  context, and the client does not send it.
 
 - **Breaking:** `DocumentsOptions.BlobName` becomes `KeyPrefix`, the first segment of every blob key:
   Stellaegis.Blobs 3.0.0 no longer has a blob space name. A blob is stored at

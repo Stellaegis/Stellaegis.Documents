@@ -4,8 +4,9 @@ namespace Stellaegis.Documents.Client;
 /// Configuration of the document API client, bound from <see cref="SectionName"/>.
 /// </summary>
 /// <remarks>
-/// The host maps the document endpoints where it chooses: a group per compartment, and a group for the shared
-/// space. Each URL names one of them, and neither is deduced from the other. At least one is required.
+/// The host maps the document endpoints where it chooses: a group per compartment, a group for the shared
+/// space, and a group for administration. Each URL names one of them, and none is deduced from another. At
+/// least one is required.
 /// </remarks>
 public sealed class DocumentsClientOptions
 {
@@ -29,6 +30,13 @@ public sealed class DocumentsClientOptions
     /// shared document.
     /// </summary>
     public string? SharedUrl { get; init; }
+
+    /// <summary>
+    /// Absolute URL under which the host maps the administration endpoints, <c>documents</c> appended to it
+    /// (e.g. <c>https://documents.example.com/api/admin/</c>). <see langword="null"/>: the client cannot purge a
+    /// compartment.
+    /// </summary>
+    public string? AdminUrl { get; init; }
 
     /// <summary>
     /// Timeout of one request, content transfer included. Five minutes by default, since requests carry

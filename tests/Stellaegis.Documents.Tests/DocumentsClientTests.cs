@@ -98,9 +98,9 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         await documents.TrashAsync(compartment, trashed.DocumentUniqueId, Ignored, Ct);
         Assert.Single((await documents.ListAsync(compartment, cancellationToken: Ct)).Documents);
 
-        var refused = await Assert.ThrowsAsync<UserFacingException>(() => documents.PurgeCompartmentAsync(compartment, Ct));
+        var refused = await Assert.ThrowsAsync<UserFacingException>(() => documents.PurgeCompartmentAsync(compartment, Ignored, Ct));
         Assert.Equal(ErrorType.Forbidden, refused.Type);
-        Assert.Equal(2, await host.Client("ops", "admin").PurgeCompartmentAsync(compartment, Ct));
+        Assert.Equal(2, await host.Client("ops", "admin").PurgeCompartmentAsync(compartment, Ignored, Ct));
     }
 
     [Fact]
@@ -130,8 +130,18 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
     }
 
     [Fact]
+    public async Task A_purge_without_the_administration_url_throws_and_sends_nothing()
+    {
+        var compartment = NewCompartment();
+        await host.Client("alice").CreateAsync(compartment, "note", Upload("k"), Ignored, cancellationToken: Ct);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.Client("ops", "admin", admin: false).PurgeCompartmentAsync(compartment, Ignored, Ct));
+        Assert.Single((await host.Client("alice").ListAsync(compartment, cancellationToken: Ct)).Documents);
+    }
+
+    [Fact]
     public void A_client_without_any_url_fails_when_resolved()
     {
-        Assert.Throws<InvalidOperationException>(() => host.Client("alice", compartments: false, shared: false));
+        Assert.Throws<InvalidOperationException>(() => host.Client("alice", compartments: false, shared: false, admin: false));
     }
 }

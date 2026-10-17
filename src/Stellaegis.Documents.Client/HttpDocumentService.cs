@@ -15,8 +15,9 @@ namespace Stellaegis.Documents.Client;
 /// <remarks>
 /// <para>
 /// A call in a compartment goes to <see cref="DocumentsClientOptions.CompartmentUrl"/>, a call in the shared
-/// space to <see cref="DocumentsClientOptions.SharedUrl"/>; a call whose URL is not configured throws an
-/// <see cref="InvalidOperationException"/>, and never goes to the other one.
+/// space to <see cref="DocumentsClientOptions.SharedUrl"/>, a purge to <see cref="DocumentsClientOptions.AdminUrl"/>;
+/// a call whose URL is not configured throws an <see cref="InvalidOperationException"/>, and never goes to
+/// another one.
 /// </para>
 /// <para>
 /// The server records the authenticated caller as the actor of a change: the <c>actor</c> argument is not
@@ -39,6 +40,7 @@ internal sealed class HttpDocumentService : IDocumentService
     private readonly HttpClient _http;
     private readonly string? _compartmentUrl;
     private readonly string? _sharedUrl;
+    private readonly string? _adminUrl;
 
     /// <summary>Creates the client, validating the URLs it is configured with.</summary>
     public HttpDocumentService(HttpClient http, IOptions<DocumentsClientOptions> options)
@@ -47,10 +49,11 @@ internal sealed class HttpDocumentService : IDocumentService
         var value = Guard.NotNull(options).Value;
         _compartmentUrl = Absolute(value.CompartmentUrl, nameof(DocumentsClientOptions.CompartmentUrl));
         _sharedUrl = Absolute(value.SharedUrl, nameof(DocumentsClientOptions.SharedUrl));
-        if (_compartmentUrl is null && _sharedUrl is null)
+        _adminUrl = Absolute(value.AdminUrl, nameof(DocumentsClientOptions.AdminUrl));
+        if (_compartmentUrl is null && _sharedUrl is null && _adminUrl is null)
             throw new InvalidOperationException(
-                $"{DocumentsClientOptions.SectionName}: {nameof(DocumentsClientOptions.CompartmentUrl)} or " +
-                $"{nameof(DocumentsClientOptions.SharedUrl)} is required.");
+                $"{DocumentsClientOptions.SectionName}: {nameof(DocumentsClientOptions.CompartmentUrl)}, " +
+                $"{nameof(DocumentsClientOptions.SharedUrl)} or {nameof(DocumentsClientOptions.AdminUrl)} is required.");
     }
 
     public async Task<Document> CreateAsync(Space space, string documentType, DocumentUpload upload, Actor actor, bool isVersioned = false, CancellationToken cancellationToken = default)
@@ -143,11 +146,13 @@ internal sealed class HttpDocumentService : IDocumentService
         await EnsureSuccessAsync(response, documentUniqueId, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<int> PurgeCompartmentAsync(Compartment compartment, CancellationToken cancellationToken = default)
+    public async Task<int> PurgeCompartmentAsync(Compartment compartment, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(compartment);
 
-        using var response = await _http.DeleteAsync(Url(compartment, string.Empty), cancellationToken).ConfigureAwait(false);
+        var url = (_adminUrl ?? throw NotConfigured(nameof(DocumentsClientOptions.AdminUrl), "purges no compartment"))
+            + "documents/compartments/" + compartment.Value;
+        using var response = await _http.DeleteAsync(url, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, null, cancellationToken).ConfigureAwait(false);
         return (await ReadAsync<PurgeResponse>(response, cancellationToken).ConfigureAwait(false)).Purged;
     }
@@ -175,14 +180,14 @@ internal sealed class HttpDocumentService : IDocumentService
     private string Url(Space space, string rest)
     {
         if (space.Compartment is not { } compartment)
-            return (_sharedUrl ?? throw NotConfigured(nameof(DocumentsClientOptions.SharedUrl), "the shared space")) + "documents" + rest;
+            return (_sharedUrl ?? throw NotConfigured(nameof(DocumentsClientOptions.SharedUrl), "reaches no document in the shared space")) + "documents" + rest;
 
-        var url = _compartmentUrl ?? throw NotConfigured(nameof(DocumentsClientOptions.CompartmentUrl), "a compartment");
+        var url = _compartmentUrl ?? throw NotConfigured(nameof(DocumentsClientOptions.CompartmentUrl), "reaches no document in a compartment");
         return url.Replace(DocumentsClientOptions.CompartmentPlaceholder, compartment.Value, StringComparison.Ordinal) + "documents" + rest;
     }
 
-    private static InvalidOperationException NotConfigured(string option, string target)
-        => new($"{DocumentsClientOptions.SectionName}:{option} is not configured: this client reaches no document in {target}.");
+    private static InvalidOperationException NotConfigured(string option, string consequence)
+        => new($"{DocumentsClientOptions.SectionName}:{option} is not configured: this client {consequence}.");
 
     // A URL ends with '/' so that "documents" extends its path. A compartment, when the placeholder is replaced,
     // is a valid path segment by its grammar.

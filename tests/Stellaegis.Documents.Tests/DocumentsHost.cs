@@ -21,8 +21,8 @@ namespace Stellaegis.Documents.Tests;
 
 /// <summary>
 /// An in-memory host mapping the document API twice: under <c>/api/t/{compartment}</c>, as Stellaegis routes its
-/// tenants, and under <c>/api/shared</c> for the shared space. Every operation is open to any authenticated caller
-/// but the purge, kept for the <c>admin</c> role, and an
+/// tenants, and under <c>/api/shared</c> for the shared space; and its administration under <c>/api/admin</c>. Every
+/// operation is open to any authenticated caller but the administration, kept for the <c>admin</c> role, and an
 /// authorization handler that refuses <c>mallory</c> every document. The caller's identity is a header, set by <see cref="Http"/> and
 /// <see cref="Client"/>.
 /// </summary>
@@ -55,10 +55,9 @@ public sealed class DocumentsHost : IAsyncLifetime
         _app = builder.Build();
         _app.UseAuthentication();
         _app.UseAuthorization();
-        _app.MapGroup("/api/t/{compartment}").MapDocumentsEndpoints()
-            .RequireAuthorizationPerOperation(op => op == DocumentOperations.Purge ? "admin" : "member");
-        _app.MapGroup("/api/shared").MapDocumentsEndpoints().InSharedSpace()
-            .RequireAuthorizationPerOperation(op => op == DocumentOperations.Purge ? "admin" : "member");
+        _app.MapGroup("/api/t/{compartment}").MapDocumentsEndpoints().RequireAuthorization("member");
+        _app.MapGroup("/api/shared").MapDocumentsEndpoints().InSharedSpace().RequireAuthorization("member");
+        _app.MapGroup("/api/admin").MapDocumentsAdminEndpoints().RequireAuthorization("admin");
         await _app.StartAsync();
     }
 
@@ -80,16 +79,17 @@ public sealed class DocumentsHost : IAsyncLifetime
 
     /// <summary>
     /// The document client as <paramref name="subject"/>, its requests carried to the host, configured with the
-    /// URL of the compartments and the URL of the shared space unless told otherwise. With
+    /// URL of the compartments, the URL of the shared space and the URL of administration unless told otherwise. With
     /// <paramref name="damage"/>, the first byte of every downloaded content is flipped on its way.
     /// </summary>
-    public IDocumentService Client(string subject, string? role = null, bool damage = false, bool compartments = true, bool shared = true)
+    public IDocumentService Client(string subject, string? role = null, bool damage = false, bool compartments = true, bool shared = true, bool admin = true)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(
             [
                 KeyValuePair.Create("Stellaegis:Documents:Client:CompartmentUrl", compartments ? "http://localhost/api/t/{compartment}" : null),
                 KeyValuePair.Create("Stellaegis:Documents:Client:SharedUrl", shared ? "http://localhost/api/shared/" : null),
+                KeyValuePair.Create("Stellaegis:Documents:Client:AdminUrl", admin ? "http://localhost/api/admin/" : null),
             ])
             .Build();
 
