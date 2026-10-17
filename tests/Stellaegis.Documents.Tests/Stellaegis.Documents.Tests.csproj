@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <None Include="..\..\docs\sql\stellaegis_documents.sql" Link="sql\stellaegis_documents.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\docs\sql\owner-isolation.sql" Link="sql\owner-isolation.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

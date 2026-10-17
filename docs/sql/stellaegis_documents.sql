@@ -12,10 +12,15 @@
 -- Isolation: every document carries its compartment, and every query of the
 -- store filters on it. A null compartment is the shared space: documents that
 -- belong to no compartment, reached only through routes the host marks for it.
+-- Row-level security repeats the filter in the database (end of this script):
+-- the store opens every connection in a space, set in the session context, and
+-- a row of another space is invisible whatever the query. owner-isolation.sql,
+-- applied or not by the host, further keeps each actor to the documents it
+-- created.
 --
 -- Content: one blob per content, stored flat under a key the module derives
--- from the identity alone, {document_unique_id:N}-{version_number}. No key is
--- stored here. A change of content always goes to the next number, so no
+-- from the identity alone, {KeyPrefix}/{document_unique_id:N}-{version_number}.
+-- No key is stored here. A change of content always goes to the next number, so no
 -- content is overwritten in place.
 --
 -- Keys: document_unique_id is the primary key, and doc.document_versions carries
@@ -126,6 +131,49 @@ comment on column doc.document_versions.file_name is
 -- space is the null compartment, which the index holds like any other value.
 create index ix_documents_compartment_created
   on doc.documents (compartment, created_at desc, document_unique_id desc);
+
+-- ============================================================================
+-- Row-level security
+-- ============================================================================
+
+-- The store sets the space of every connection in the session context, as
+-- Stellaegis.Primitives.Data does: stellaegis.space holds the compartment, or
+-- '_shared' for the shared space, stored here as a null compartment. A session
+-- without a space sees nothing and writes nothing: compartment = null is never
+-- true.
+--
+-- This guards against a query that forgets its filter, not against a client of
+-- the database: whoever holds the connection can change the setting.
+--
+-- force: without it, the owner of the tables escapes the policies, and an
+-- application connected under the role that created the schema would run with
+-- no isolation and no error. A superuser always escapes them.
+
+alter table doc.documents enable row level security;
+alter table doc.documents force row level security;
+
+create policy pl_documents_space on doc.documents
+  using (
+    case current_setting('stellaegis.space', true)
+      when '_shared' then compartment is null
+      else compartment = current_setting('stellaegis.space', true)
+    end)
+  with check (
+    case current_setting('stellaegis.space', true)
+      when '_shared' then compartment is null
+      else compartment = current_setting('stellaegis.space', true)
+    end);
+
+-- A version is visible when its document is: the subquery reads doc.documents
+-- under its own policies, those of owner-isolation.sql included. The cascade
+-- that deletes the versions of a document is a referential action, which row
+-- security does not filter.
+alter table doc.document_versions enable row level security;
+alter table doc.document_versions force row level security;
+
+create policy pl_document_versions_document on doc.document_versions
+  using (exists (select 1 from doc.documents d where d.document_unique_id = document_versions.document_unique_id))
+  with check (exists (select 1 from doc.documents d where d.document_unique_id = document_versions.document_unique_id));
 
 -- ============================================================================
 -- Framework evolution tracking

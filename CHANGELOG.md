@@ -16,6 +16,14 @@ Built on Stellaegis.Primitives 3.0.0 and Stellaegis.Blobs 3.0.0.
 - `MapDocumentsAdminEndpoints`, the administration of the module, mapped apart on a group the host secures for
   its administrators. It holds the purge: `DELETE documents/compartments/{compartment}`, the compartment being
   the object of the route rather than its context. `404` for a value that is not a compartment.
+- Row-level security on `doc.documents` and `doc.document_versions`, in the schema script: a session sees and
+  writes only the documents of the space in its session context, a version only when its document is visible,
+  and a session without a space sees nothing. It is forced on the owner of the tables; a superuser escapes it,
+  so the application connects under an ordinary role.
+- `docs/sql/owner-isolation.sql`, optional: within a compartment, each actor sees only the documents it created.
+  For a host where a document belongs to its author alone, never one that shares documents between users.
+- `DocumentActors.Purge`, `admin:purge`: the actor the purge opens its session under, which `owner-isolation.sql`
+  lets through so that a purge empties the whole compartment.
 - `DocumentsClientOptions.AdminUrl`, where the client sends a purge. A purge without it throws an
   `InvalidOperationException`; a client configured with none of the three URLs fails when it is resolved.
 

@@ -82,7 +82,8 @@ dotnet add package Stellaegis.Blobs.FileSystem
 
 Create the schema with [`docs/sql/stellaegis_documents.sql`](https://github.com/Stellaegis/Stellaegis.Documents/blob/main/docs/sql/stellaegis_documents.sql).
 The script creates the `doc` schema and enables the `pgcrypto` extension, which encrypts file names;
-the role that runs it needs the right to create an extension.
+the role that runs it needs the right to create an extension. It also enables row-level security, so
+connect the application under an ordinary role: see [Isolation in the database](#isolation-in-the-database).
 
 Then register a blob store and the document store:
 
@@ -344,6 +345,9 @@ reach every document of the space declares it on the group, as it would declare 
 app.MapGroup("/api/orgs/{org}").MapDocumentsEndpoints().AllowAnyResource();
 ```
 
+So does a host whose database keeps each user to their own documents: see
+[Isolation in the database](#isolation-in-the-database).
+
 ### Reaching the endpoints from another process
 
 ```sh
@@ -431,6 +435,54 @@ written before keep their former slot and stay readable as long as its passphras
 The library does not re-encrypt existing rows in this version, so a former passphrase stays needed
 until every row that uses it has been rewritten.
 
+## Isolation in the database
+
+The PostgreSQL store opens every call in a space, for an actor, through `ISpaceUnitOfWorkFactory` of
+[Stellaegis.Primitives.Data](https://github.com/Stellaegis/Stellaegis.Primitives): both are set in the
+session context of the connection, `stellaegis.space` (the compartment, or `_shared`) and
+`stellaegis.actor`. Row-level security reads them, so the database keeps the spaces apart even from a
+query that would forget its filter.
+
+**Spaces.** The schema script enables row-level security on both tables: a session sees and writes only
+the documents of its space, a version only when its document is visible, and a session without a space
+sees nothing. It applies to every host.
+
+⚠ **Connect under an ordinary role.** PostgreSQL never applies row-level security to a superuser. The
+script forces it on the owner of the tables, so the role that created the schema is filtered too.
+
+**Owners, optionally.** [`docs/sql/owner-isolation.sql`](https://github.com/Stellaegis/Stellaegis.Documents/blob/main/docs/sql/owner-isolation.sql)
+further keeps every actor to the documents it created: Alice and Bob work in the same compartment, and
+neither sees the other's documents. Apply it after the schema script, where a document belongs to its
+author alone. Do not apply it where your application shares documents between users, through an
+authorization handler for instance: the database would hide the documents of others before the handler
+is asked. The purge opens its session under `DocumentActors.Purge`, `admin:purge`, which the script lets
+through so that a purge empties the whole compartment; the library logs the actor who asked for it.
+
+This guards against a mistake of the application, not against a client of the database: whoever holds a
+connection can change its session context.
+
+An application with a single compartment, where each user sees only their own documents and nothing
+else decides who reaches what:
+
+```csharp
+public static class Tenant
+{
+    public static readonly Compartment Owner = Compartment.Parse("acme");   // the organization owning the data
+}
+
+builder.Services.AddStellaegisFileSystemBlobStore(o => o.RootPath = "/var/lib/myapp/blobs");
+builder.Services.AddStellaegisDocumentsPostgreSQL(builder.Configuration);   // schema script, then owner-isolation.sql
+builder.Services.AddStellaegisRequestContext(c => c.SingleCompartment(Tenant.Owner));
+
+app.MapGroup("/api").MapDocumentsEndpoints()
+   .RequireAuthorization()      // any authenticated user
+   .AllowAnyResource();         // the database returns the caller's documents only
+// MapDocumentsAdminEndpoints is not mapped: this host has no purge.
+```
+
+⚠ `AllowAnyResource()` relies on the owner script being applied. Without it, every user reaches every
+document of the compartment, and nothing at startup can tell.
+
 ## Limits of this version
 
 - **Concurrent changes of one document.** Two changes of the same document at the same moment compute
@@ -448,9 +500,12 @@ until every row that uses it has been rewritten.
 dotnet test --solution Stellaegis.Documents.slnx
 ```
 
-The PostgreSQL tests use a database of their own, `stellaegis_documents_tests` on a local server as
-user `postgres`, or the connection string in `STELLAEGIS_DOCUMENTS_TEST_POSTGRES`. They rebuild the
-`doc` schema from `docs/sql` at every run, and they are skipped when no server answers. The other tests
+The PostgreSQL tests use databases of their own, `stellaegis_documents_tests` on a local server as
+user `postgres`, or the connection string in `STELLAEGIS_DOCUMENTS_TEST_POSTGRES`, and the same name
+suffixed with `_owner`, where `owner-isolation.sql` is applied. They rebuild the `doc` schema from
+`docs/sql` at every run, and they are skipped when no server answers. The tests of row-level security
+connect under `stellaegis_documents_app`, an ordinary role they create, since a superuser escapes the
+policies. The other tests
 need no external service.
 
 ## License

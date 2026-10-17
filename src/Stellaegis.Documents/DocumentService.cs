@@ -189,12 +189,13 @@ internal sealed class DocumentService(
         _logger.LogInformation("Purging the documents of compartment {Compartment}, by {Actor}.", compartment, actor);
 
         // Batches keep memory bounded. Deleted documents leave the next query, so no position is kept:
-        // the purge takes what remains until nothing does.
+        // the purge takes what remains until nothing does. The store works under DocumentActors.Purge, which
+        // an isolation by owner lets through: under the caller, it would see only the caller's documents.
         var purged = new HashSet<Guid>();
         IReadOnlyList<Document> batch;
         do
         {
-            batch = await _store.ListAnyStatusAsync(space, PurgeBatchSize, actor, cancellationToken).ConfigureAwait(false);
+            batch = await _store.ListAnyStatusAsync(space, PurgeBatchSize, DocumentActors.Purge, cancellationToken).ConfigureAwait(false);
             foreach (var document in batch)
             {
                 if (!purged.Add(document.DocumentUniqueId))
@@ -205,7 +206,7 @@ internal sealed class DocumentService(
                 for (var version = 1; version <= document.VersionNumber; version++)
                     await _blobStore.DeleteAsync(Location(space, document.DocumentUniqueId, version), cancellationToken).ConfigureAwait(false);
 
-                await _store.DeleteAsync(space, document.DocumentUniqueId, actor, cancellationToken).ConfigureAwait(false);
+                await _store.DeleteAsync(space, document.DocumentUniqueId, DocumentActors.Purge, cancellationToken).ConfigureAwait(false);
             }
         }
         while (batch.Count == PurgeBatchSize);
