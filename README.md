@@ -90,7 +90,7 @@ builder.Services.AddStellaegisDocumentsPostgreSQL(builder.Configuration);
 {
   "Stellaegis": {
     "Documents": {
-      "BlobName": "documents",
+      "KeyPrefix": "documents",
       "ListPageSize": 100,
       "PostgreSQL": {
         "ConnectionString": "Host=…;Database=…",
@@ -102,7 +102,7 @@ builder.Services.AddStellaegisDocumentsPostgreSQL(builder.Configuration);
 }
 ```
 
-- `BlobName` is the name the content goes to in Stellaegis.Blobs (`BlobLocation.Name`), within each compartment and in the shared space.
+- `KeyPrefix` is the first segment of the key of every blob holding document content, in Stellaegis.Blobs: it keeps the documents apart from the other content of the store. A prefix the store refuses fails when the service is built.
 - `ListPageSize` is the number of documents in one page of a list, between 1 and 1000.
 - `Keys` are the passphrases that encrypt file names (see
   [File names are encrypted](#file-names-are-encrypted)). Supply them from a secret store or the
@@ -155,8 +155,8 @@ contract is.
 
 ### Storage layout
 
-Content is stored flat: one blob per content, under the name `BlobName` of the document's compartment, or
-of the shared space, with the key `{document GUID}-{content number}`. Stellaegis.Blobs keeps the shared
+Content is stored flat: one blob per content, in the document's compartment or in the shared space, with
+the key `{KeyPrefix}/{document GUID}-{content number}`. Stellaegis.Blobs keeps the shared
 space apart from every compartment. The library stores no key: it derives each key from the document's
 identity. Moving the content to another storage therefore needs no change in the database.
 

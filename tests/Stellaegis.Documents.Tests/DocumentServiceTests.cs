@@ -37,6 +37,27 @@ public sealed class DocumentServiceTests
     }
 
     [Fact]
+    public async Task Content_is_stored_under_the_key_prefix_in_the_directory_of_its_space()
+    {
+        await using var harness = DocumentsHarness.InMemory(keyPrefix: "ged");
+        var compartment = NewCompartment();
+
+        var inCompartment = await harness.Documents.CreateAsync(compartment, "invoice", Upload("hello"), Alice, cancellationToken: Ct);
+        var shared = await harness.Documents.CreateAsync(Space.Shared, "invoice", Upload("hello"), Alice, cancellationToken: Ct);
+
+        Assert.Equal(
+            [$"_shared/ged/{shared.DocumentUniqueId:N}-1", $"{compartment}/ged/{inCompartment.DocumentUniqueId:N}-1"],
+            harness.BlobPaths().Order(StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("Documents")]
+    [InlineData("documents/")]
+    [InlineData("nul")]
+    public void A_key_prefix_the_blob_store_refuses_fails_when_the_service_is_built(string keyPrefix)
+        => Assert.ThrowsAny<ArgumentException>(() => DocumentsHarness.InMemory(keyPrefix: keyPrefix));
+
+    [Fact]
     public async Task An_empty_file_is_a_valid_content()
     {
         await using var harness = DocumentsHarness.InMemory();

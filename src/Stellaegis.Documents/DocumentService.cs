@@ -42,7 +42,7 @@ internal sealed class DocumentService(
 
     private readonly IDocumentStore _store = Guard.NotNull(store);
     private readonly IBlobStore _blobStore = Guard.NotNull(blobStore);
-    private readonly string _blobName = Guard.NotWhiteSpace(Guard.NotNull(options).Value.BlobName);
+    private readonly string _keyPrefix = ValidKeyPrefix(Guard.NotNull(options).Value.KeyPrefix);
     private readonly ILogger<DocumentService> _logger = Guard.NotNull(logger);
     private readonly int _listPageSize = Guard.Satisfies(Guard.NotNull(options).Value.ListPageSize, size => size is >= 1 and <= 1000,
         $"{nameof(DocumentsOptions)}.{nameof(DocumentsOptions.ListPageSize)} must be between 1 and 1000.");
@@ -265,9 +265,14 @@ internal sealed class DocumentService(
         => _blobStore.DeleteAsync(Location(space, documentUniqueId, versionNumber), cancellationToken);
 
     private BlobLocation Location(Space space, Guid documentUniqueId, int versionNumber)
+        => new(space, $"{_keyPrefix}/{documentUniqueId:N}-{versionNumber}");
+
+    // A prefix the blob store refuses fails here, when the service is built, rather than at the first write.
+    private static string ValidKeyPrefix(string keyPrefix)
     {
-        var key = $"{documentUniqueId:N}-{versionNumber}";
-        return space.IsShared ? BlobLocation.Shared(_blobName, key) : new BlobLocation(space.Compartment, _blobName, key);
+        Guard.NotWhiteSpace(keyPrefix);
+        _ = new BlobLocation(Space.Shared, $"{keyPrefix}/{Guid.Empty:N}-1");
+        return keyPrefix;
     }
 
     // A token only positions a list the store already scopes to the space: altering it moves the page,

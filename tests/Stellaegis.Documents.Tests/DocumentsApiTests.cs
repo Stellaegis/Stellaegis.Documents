@@ -191,7 +191,7 @@ public sealed class DocumentsApiTests(DocumentsHost host) : IClassFixture<Docume
         Assert.Equal(9, operations.Count);
         Assert.DoesNotContain(null, operations);
         Assert.Equal(operations.Count, operations.Distinct().Count());
-        Assert.All(operations, op => Assert.Equal(DocumentOperations.Module, op!.Module));
+        Assert.All(operations, op => Assert.Equal(DocumentOperations.Target, op!.Target));
     }
 
     [Fact]

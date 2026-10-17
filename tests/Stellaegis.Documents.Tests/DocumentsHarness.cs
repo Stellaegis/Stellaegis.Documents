@@ -42,9 +42,15 @@ internal sealed class DocumentsHarness : IAsyncDisposable
     public string BlobRoot { get; }
 
     /// <summary>A service on the in-memory store.</summary>
-    public static DocumentsHarness InMemory(int listPageSize = 100) => new(
+    public static DocumentsHarness InMemory(int listPageSize = 100, string? keyPrefix = null) => new(
         (services, configuration) => services.AddStellaegisDocumentsInMemory(configuration),
-        new Dictionary<string, string?> { ["Stellaegis:Documents:ListPageSize"] = listPageSize.ToString() });
+        keyPrefix is null
+            ? new Dictionary<string, string?> { ["Stellaegis:Documents:ListPageSize"] = listPageSize.ToString() }
+            : new Dictionary<string, string?>
+            {
+                ["Stellaegis:Documents:ListPageSize"] = listPageSize.ToString(),
+                ["Stellaegis:Documents:KeyPrefix"] = keyPrefix,
+            });
 
     /// <summary>A service on the PostgreSQL store, its file names under the passphrase of <paramref name="activeSlot"/>.</summary>
     public static DocumentsHarness PostgreSql(string connectionString, int activeSlot = 1, int listPageSize = 100) => new(
@@ -57,6 +63,13 @@ internal sealed class DocumentsHarness : IAsyncDisposable
             ["Stellaegis:Documents:PostgreSQL:Keys:1"] = "first-test-passphrase",
             ["Stellaegis:Documents:PostgreSQL:Keys:2"] = activeSlot == 2 ? "second-test-passphrase" : string.Empty,
         });
+
+    /// <summary>The paths of the blobs on disk, relative to the blob root and with <c>/</c> between segments.</summary>
+    public IReadOnlyList<string> BlobPaths()
+        => Directory.Exists(BlobRoot)
+            ? Directory.GetFiles(BlobRoot, "*", SearchOption.AllDirectories)
+                .Select(f => Path.GetRelativePath(BlobRoot, f).Replace(Path.DirectorySeparatorChar, '/')).ToList()
+            : [];
 
     /// <summary>The names of the blobs on disk, whatever their space.</summary>
     public IReadOnlyList<string> BlobNames()

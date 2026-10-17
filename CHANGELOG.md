@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Built on Stellaegis.Primitives 3.0.0 and Stellaegis.Blobs 3.0.0.
+
+### Added
+
+- `DocumentsModule`, the identity of the module (`IStellaegisModule`): the routes of `MapDocumentsEndpoints`
+  belong to it.
+
+### Changed
+
+- **Breaking:** `DocumentsOptions.BlobName` becomes `KeyPrefix`, the first segment of every blob key:
+  Stellaegis.Blobs 3.0.0 no longer has a blob space name. A blob is stored at
+  `{compartment}/{KeyPrefix}/{document GUID}-{content number}`, `_shared/…` for the shared space, which is
+  where `FileSystemBlobStore` kept it before. A prefix the blob store refuses throws an `ArgumentException`
+  when the service is built.
+- **Breaking:** `DocumentOperations.Module` becomes `Target`: the first argument of an `Operation` is the type
+  of data it acts on. Its value, `documents`, and the operation names do not change.
+- Depends on Stellaegis.Primitives 3.0.0, Stellaegis.Primitives.Data 3.0.0, Stellaegis.Primitives.AspNetCore
+  3.0.0 and Stellaegis.Blobs 3.0.0. The startup check of Stellaegis.Primitives.AspNetCore now refuses a route
+  without an authorization requirement: a host relying on its fallback policy declares `RequireAuthorization()`
+  on the group.
+
 ## [2.0.0] — 2026-10-14
 
 Each document belongs to a compartment or to the shared space, and the host attaches its own security

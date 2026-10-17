@@ -91,7 +91,8 @@ public static class EndpointRouteBuilderExtensions
         Guard.NotNull(endpoints);
 
         var group = endpoints.MapGroup("documents")
-            .RequireRequestContext("Documents", acceptsSharedSpace: true);
+            .BelongsTo<DocumentsModule>()
+            .RequireRequestContext(acceptsSharedSpace: true);
         group.AddErrorTranslation();
 
         group.MapPost("/", async (HttpContext http, IRequestContext context, IDocumentService documents, CancellationToken ct) =>
