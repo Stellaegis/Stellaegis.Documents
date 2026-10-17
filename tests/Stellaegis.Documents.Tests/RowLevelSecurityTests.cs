@@ -10,7 +10,7 @@ namespace Stellaegis.Documents.Tests;
 /// connection; the checks read the tables directly, with a query that filters on nothing but the documents of the
 /// test.
 /// </summary>
-public sealed class RowLevelSecurityTests(PostgreSqlFixture database) : IClassFixture<PostgreSqlFixture>
+public sealed class RowLevelSecurityTests(RowLevelSecurityFixture database) : IClassFixture<RowLevelSecurityFixture>
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

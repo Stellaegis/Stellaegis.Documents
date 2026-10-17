@@ -14,12 +14,24 @@ namespace Stellaegis.Documents.Tests;
 public sealed class PostgreSqlFixture() : PostgreSqlDatabase(databaseSuffix: null, ownerIsolation: false);
 
 /// <summary>
-/// A second database, the name of the first suffixed with <c>_owner</c>, where <c>owner-isolation.sql</c> is
-/// applied after the DDL: each actor sees only the documents it created.
+/// A database for the tests of row-level security, the name of the first suffixed with <c>_rls</c>, without the
+/// isolation by owner.
+/// </summary>
+public sealed class RowLevelSecurityFixture() : PostgreSqlDatabase(databaseSuffix: "_rls", ownerIsolation: false);
+
+/// <summary>
+/// A database for the tests of the isolation by owner, the name of the first suffixed with <c>_owner</c>, where
+/// <c>owner-isolation.sql</c> is applied after the DDL: each actor sees only the documents it created.
 /// </summary>
 public sealed class OwnerIsolationFixture() : PostgreSqlDatabase(databaseSuffix: "_owner", ownerIsolation: true);
 
-/// <summary>A test database, rebuilt at every run, and the ordinary role that row-level security applies to.</summary>
+/// <summary>
+/// A test database, rebuilt at every run, and the ordinary role that row-level security applies to.
+/// </summary>
+/// <remarks>
+/// xunit builds one fixture per test class, and the classes run in parallel: each class has a database of its
+/// own, since rebuilding the schema drops it under the tests of any other class using the same database.
+/// </remarks>
 public abstract class PostgreSqlDatabase : IAsyncLifetime
 {
     private const string Variable = "STELLAEGIS_DOCUMENTS_TEST_POSTGRES";

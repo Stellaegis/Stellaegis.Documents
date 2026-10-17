@@ -502,7 +502,7 @@ dotnet test --solution Stellaegis.Documents.slnx
 
 The PostgreSQL tests use databases of their own, `stellaegis_documents_tests` on a local server as
 user `postgres`, or the connection string in `STELLAEGIS_DOCUMENTS_TEST_POSTGRES`, and the same name
-suffixed with `_owner`, where `owner-isolation.sql` is applied. They rebuild the `doc` schema from
+suffixed with `_rls` and with `_owner`, the latter with `owner-isolation.sql` applied. They rebuild the `doc` schema from
 `docs/sql` at every run, and they are skipped when no server answers. The tests of row-level security
 connect under `stellaegis_documents_app`, an ordinary role they create, since a superuser escapes the
 policies. The other tests
