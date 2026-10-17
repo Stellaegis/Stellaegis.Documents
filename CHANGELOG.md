@@ -5,8 +5,10 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.0] — 2026-10-17
 
+The database keeps the spaces apart, and each owner apart on request: every call reaches it with its space
+and its actor, and row-level security reads them. The purge becomes an administration route of its own.
 Built on Stellaegis.Primitives 3.0.0 and Stellaegis.Blobs 3.0.0.
 
 ### Added
@@ -35,7 +37,6 @@ Built on Stellaegis.Primitives 3.0.0 and Stellaegis.Blobs 3.0.0.
 - **Breaking:** `PurgeCompartmentAsync(compartment, actor)` takes the actor who purges, logged when the purge
   starts and when it ends. No event is published. Over HTTP the server takes the actor from the request
   context, and the client does not send it.
-
 - **Breaking:** `DocumentsOptions.BlobName` becomes `KeyPrefix`, the first segment of every blob key:
   Stellaegis.Blobs 3.0.0 no longer has a blob space name. A blob is stored at
   `{compartment}/{KeyPrefix}/{document GUID}-{content number}`, `_shared/…` for the shared space, which is
@@ -55,6 +56,21 @@ Built on Stellaegis.Primitives 3.0.0 and Stellaegis.Blobs 3.0.0.
   3.0.0 and Stellaegis.Blobs 3.0.0. The startup check of Stellaegis.Primitives.AspNetCore now refuses a route
   without an authorization requirement: a host relying on its fallback policy declares `RequireAuthorization()`
   on the group.
+
+### Updating from 2.0.0
+
+- Recreate the `doc` schema from `docs/sql/stellaegis_documents.sql`, which now enables row-level security.
+  No migration script is provided. Connect the application under a role that is not a superuser; apply
+  `docs/sql/owner-isolation.sql` only if each document belongs to its author alone.
+- Pass the actor to every read: `GetAsync`, `ListAsync(space, actor, continuationToken)`, `OpenContentAsync`,
+  `OpenVersionContentAsync`, `GetVersionsAsync`. A store of your own adds the actor to every method of
+  `IDocumentStore`.
+- Rename `BlobName` to `KeyPrefix` in your configuration. With `FileSystemBlobStore`, the content stays where
+  it is.
+- Map `MapDocumentsAdminEndpoints()` on a group secured for your administrators if you purge over HTTP, and
+  configure the client with `AdminUrl`. Pass the actor to `PurgeCompartmentAsync`.
+- Declare an authorization requirement on each mapped group, such as `RequireAuthorization()`: a fallback policy
+  no longer counts. Replace `DocumentOperations.Module` with `DocumentOperations.Target`.
 
 ## [2.0.0] — 2026-10-14
 
