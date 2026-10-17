@@ -9,10 +9,15 @@ alongside them, each under its own license.
 | --- | --- | --- | --- |
 | Stellaegis.Primitives | all packages | MIT | <https://github.com/Stellaegis/Stellaegis.Primitives> |
 | Stellaegis.Primitives.Data | `Stellaegis.Documents.PostgreSQL` | MIT | <https://github.com/Stellaegis/Stellaegis.Primitives> |
+| Stellaegis.Primitives.AspNetCore | `Stellaegis.Documents.AspNetCore` | MIT | <https://github.com/Stellaegis/Stellaegis.Primitives> |
 | Stellaegis.Blobs | all packages | MIT | <https://github.com/Stellaegis/Stellaegis.Blobs> |
 | Dapper | `Stellaegis.Documents.PostgreSQL` | Apache-2.0 | <https://github.com/DapperLib/Dapper> |
 | Npgsql | `Stellaegis.Documents.PostgreSQL` | PostgreSQL | <https://github.com/npgsql/npgsql> |
-| Microsoft.Extensions.\*, ASP.NET Core | all packages | MIT | <https://github.com/dotnet> |
+| Microsoft.Extensions.\* | all packages | MIT | <https://github.com/dotnet> |
+
+`Stellaegis.Documents.AspNetCore` also references the ASP.NET Core shared framework (MIT,
+<https://github.com/dotnet/aspnetcore>), which the .NET runtime provides rather than NuGet. The other packages
+do not use ASP.NET Core.
 
 The PostgreSQL store relies on the `pgcrypto` extension, part of PostgreSQL itself (PostgreSQL
 License), which the schema script enables.

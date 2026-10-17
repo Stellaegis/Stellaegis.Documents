@@ -170,5 +170,6 @@ First release as a standalone library.
   requests; uploads stream from the request and may carry a `Content-Digest`.
 - `Stellaegis.Documents.Client`: `IDocumentService` over HTTP, which sends and checks digests.
 
+[3.0.0]: https://github.com/Stellaegis/Stellaegis.Documents/releases/tag/v3.0.0
 [2.0.0]: https://github.com/Stellaegis/Stellaegis.Documents/releases/tag/v2.0.0
 [1.0.0]: https://github.com/Stellaegis/Stellaegis.Documents/releases/tag/v1.0.0

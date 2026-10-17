@@ -213,6 +213,7 @@ dotnet add package Stellaegis.Documents.AspNetCore
 
 ```csharp
 builder.Services.AddStellaegisRequestContext(c => c.CompartmentFromRoute("org"));
+builder.Services.AddSingleton<IAuthorizationHandler, DocumentAuthorizationHandler>();   // see Per-document authorization
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -222,6 +223,9 @@ app.MapGroup("/api/orgs/{org}").MapDocumentsEndpoints()
 ```
 
 The endpoints are mapped under `documents` on the builder you pass, so the URL prefix is yours.
+
+Startup fails unless every route declares who may reach the documents it loads: an authorization handler, as
+above, or `AllowAnyResource()`. Both are described in [Per-document authorization](#per-document-authorization).
 
 **The space and the actor of a request** come from the request context of
 [Stellaegis.Primitives.AspNetCore](https://github.com/Stellaegis/Stellaegis.Primitives), which your host
@@ -276,8 +280,14 @@ single compartment, a purge in the main mapping would empty the whole applicatio
 policy admits.
 
 ```csharp
-app.MapGroup("/api/admin").MapDocumentsAdminEndpoints().RequireAuthorization("platform-admin");
+app.MapGroup("/api/admin").MapDocumentsAdminEndpoints()
+   .RequireAuthorization("platform-admin")
+   .AllowAnyResource();   // the purge loads no resource
 ```
+
+The startup check of Stellaegis.Primitives.AspNetCore asks every route labelled with an operation for an
+authorization handler or `AllowAnyResource()`, the purge included. Declaring it on this group opens nothing: the
+purge loads no document for a handler to judge.
 
 | Request | Operation | Effect |
 | --- | --- | --- |
