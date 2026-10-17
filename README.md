@@ -44,12 +44,13 @@ its own data. The library publishes an event on every change so that you can kee
 
 ## Compartments and the shared space
 
-Every operation names the **space** it acts in: `CreateAsync(space, …)`, `OpenContentAsync(space, id)` and
-so on. The `Space` type comes from
+Every operation names the **space** it acts in: `CreateAsync(space, …)`, `OpenContentAsync(space, id, actor)`
+and so on. The `Space` type comes from
 [Stellaegis.Primitives](https://github.com/Stellaegis/Stellaegis.Primitives), and a space is one of two
 things:
 
-- **A compartment**, the `Compartment` type: a customer, an organization, a user. Its identifier has 3 to
+- **A compartment**, the `Compartment` type: the unit of isolation of an organization, such as a customer.
+  A user is not a compartment: the documents a user owns are a matter of ownership within one. Its identifier has 3 to
   63 characters: a lowercase letter first, then lowercase letters, digits and single hyphens, ending with a
   letter or a digit, such as `acme` or `customer-42`. A `Compartment` converts implicitly to its space, so
   you can pass one wherever a space is expected.
@@ -59,14 +60,18 @@ things:
 A document of another space behaves exactly as an absent one, on every path, versions included. A
 compartment never reaches the shared space, and the shared space never reaches a compartment.
 
-An application that does not partition its documents uses a single compartment of its choosing, such as
-`Compartment.Parse("main")`, everywhere.
+An application that does not partition its documents uses a single compartment, named after the
+organization that owns the data, everywhere: `Compartment.Parse("acme")`, declared once as a constant. The
+day a second organization joins, the first keeps its name, and nothing moves. A placeholder such as `main`
+would then name one organization among several.
 
 The library trusts the space it receives. Your code must take it from a source it controls — the
 authenticated caller, a route value it has authorized — and never pass on a compartment a user typed.
 
-Who performed a change is recorded as an `Actor`, the other type of Stellaegis.Primitives the library
-takes: a user identifier, a client identifier, or the name a scheduled task gives itself.
+Every operation also names its **actor**, an `Actor`, the other type of Stellaegis.Primitives the library
+takes: a user identifier, a client identifier, or the name a scheduled task gives itself. The actor of a
+change is recorded on the document. The actor of every call, reads included, reaches the database in the
+session context of its connection, where row-level security can read it.
 
 ## Getting started in process
 
@@ -120,7 +125,7 @@ var document = await documents.CreateAsync(
     actor: Actor.Parse(userId),
     isVersioned: false);
 
-await using var content = await documents.OpenContentAsync(acme, document.DocumentUniqueId);
+await using var content = await documents.OpenContentAsync(acme, document.DocumentUniqueId, Actor.Parse(userId));
 ```
 
 For development and tests, `AddStellaegisDocumentsInMemory(configuration)` registers a store that
@@ -383,7 +388,7 @@ differently, your handler tells them apart by the request URL.
 
 Two differences with the in-process service follow from the protocol:
 
-- the server records the authenticated caller as the actor of a change, so the `actor` argument is not
+- the server takes the authenticated caller as the actor of every call, so the `actor` argument is not
   sent;
 - the client checks a downloaded content against its `Repr-Digest` as you read it, and throws
   `InvalidDataException` at the end of a content damaged on its way. It sends the digest of an upload

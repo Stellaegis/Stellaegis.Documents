@@ -20,7 +20,7 @@ namespace Stellaegis.Documents.Client;
 /// another one.
 /// </para>
 /// <para>
-/// The server records the authenticated caller as the actor of a change: the <c>actor</c> argument is not
+/// The server takes the actor of every call from the authenticated caller: the <c>actor</c> argument is not
 /// sent. Authenticating the requests is the caller's concern, through the HTTP client builder.
 /// </para>
 /// <para>
@@ -87,13 +87,13 @@ internal sealed class HttpDocumentService : IDocumentService
         return ToDocument(space, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
     }
 
-    public Task<Stream> OpenContentAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task<Stream> OpenContentAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
         => OpenAsync(Url(Guard.NotNull(space), $"/{documentUniqueId:N}/content"), documentUniqueId, cancellationToken);
 
-    public Task<Stream> OpenVersionContentAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
+    public Task<Stream> OpenVersionContentAsync(Space space, Guid documentUniqueId, int versionNumber, Actor actor, CancellationToken cancellationToken = default)
         => OpenAsync(Url(Guard.NotNull(space), $"/{documentUniqueId:N}/versions/{versionNumber}/content"), documentUniqueId, cancellationToken);
 
-    public async Task<Document?> GetAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<Document?> GetAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(space);
 
@@ -105,7 +105,7 @@ internal sealed class HttpDocumentService : IDocumentService
         return ToDocument(space, await ReadAsync<DocumentResponse>(response, cancellationToken).ConfigureAwait(false));
     }
 
-    public async Task<DocumentPage> ListAsync(Space space, string? continuationToken = null, CancellationToken cancellationToken = default)
+    public async Task<DocumentPage> ListAsync(Space space, Actor actor, string? continuationToken = null, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(space);
 
@@ -117,7 +117,7 @@ internal sealed class HttpDocumentService : IDocumentService
         return new DocumentPage(page.Documents.Select(d => ToDocument(space, d)).ToList(), page.ContinuationToken);
     }
 
-    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(space);
 

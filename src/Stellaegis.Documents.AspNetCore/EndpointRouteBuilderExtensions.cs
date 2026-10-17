@@ -124,7 +124,7 @@ public static class EndpointRouteBuilderExtensions
 
                 // A page filtered by the host's authorization may come back shorter than the page size: its
                 // token still positions the next one.
-                var page = await documents.ListAsync(space, continuationToken, ct);
+                var page = await documents.ListAsync(space, context.Actor, continuationToken, ct);
                 var allowed = new List<DocumentResponse>();
                 foreach (var document in page.Documents)
                 {
@@ -168,7 +168,7 @@ public static class EndpointRouteBuilderExtensions
                     return access.Failure;
 
                 var document = access.Document!;
-                var stream = await documents.OpenContentAsync(access.Space, id, ct);
+                var stream = await documents.OpenContentAsync(access.Space, id, access.Actor, ct);
                 return Content(http, stream, document.ContentType, document.FileName, document.ContentHash);
             })
             .WithMetadata(DocumentOperations.ReadContent);
@@ -179,7 +179,7 @@ public static class EndpointRouteBuilderExtensions
                 if (access.Failure is not null)
                     return access.Failure;
 
-                var versions = await documents.GetVersionsAsync(access.Space, id, ct);
+                var versions = await documents.GetVersionsAsync(access.Space, id, access.Actor, ct);
                 return Results.Ok(versions.Select(DocumentVersionResponse.From).ToList());
             })
             .WithMetadata(DocumentOperations.ListVersions)
@@ -191,11 +191,11 @@ public static class EndpointRouteBuilderExtensions
                 if (access.Failure is not null)
                     return access.Failure;
 
-                var revision = (await documents.GetVersionsAsync(access.Space, id, ct)).FirstOrDefault(v => v.VersionNumber == version);
+                var revision = (await documents.GetVersionsAsync(access.Space, id, access.Actor, ct)).FirstOrDefault(v => v.VersionNumber == version);
                 if (revision is null)
                     return Results.NotFound();
 
-                var stream = await documents.OpenVersionContentAsync(access.Space, id, version, ct);
+                var stream = await documents.OpenVersionContentAsync(access.Space, id, version, access.Actor, ct);
                 return Content(http, stream, revision.ContentType, revision.FileName, revision.ContentHash);
             })
             .WithMetadata(DocumentOperations.ReadVersionContent);
@@ -260,7 +260,7 @@ public static class EndpointRouteBuilderExtensions
             return Access.Refused(Results.NotFound());
 
         // A refusal is indistinguishable from an absence, so a caller cannot probe a document's existence.
-        var document = await documents.GetAsync(space, id, ct);
+        var document = await documents.GetAsync(space, id, context.Actor, ct);
         if (document is null || !await http.AuthorizeResourceAsync(document))
             return Access.Refused(Results.NotFound());
 

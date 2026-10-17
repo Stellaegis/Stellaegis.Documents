@@ -46,7 +46,7 @@ public sealed class StreamingTests
         var (updated, onUpdate) = await MeasureAsync(() => harness.Documents.UpdateContentAsync(compartment, created.DocumentUniqueId, Generated(2), Content.Alice, Ct));
         var (hash, onRead) = await MeasureAsync(async () =>
         {
-            await using var stream = await harness.Documents.OpenContentAsync(compartment, created.DocumentUniqueId, Ct);
+            await using var stream = await harness.Documents.OpenContentAsync(compartment, created.DocumentUniqueId, Content.Alice, Ct);
             return Convert.ToHexStringLower(await System.Security.Cryptography.SHA256.HashDataAsync(stream, Ct));
         });
 

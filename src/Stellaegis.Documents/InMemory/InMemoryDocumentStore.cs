@@ -6,17 +6,17 @@ namespace Stellaegis.Documents.InMemory;
 /// <summary>
 /// In-memory <see cref="IDocumentStore"/> for development and tests. The atomic store methods
 /// (<see cref="CreateAsync"/>, <see cref="UpdateCurrentAsync"/>) are trivially atomic here; the
-/// PostgreSQL variant wraps them in a transaction.
+/// PostgreSQL variant wraps them in a transaction. It keeps no session: the actor of a read is ignored.
 /// </summary>
 internal sealed class InMemoryDocumentStore : IDocumentStore
 {
     private readonly ConcurrentDictionary<Guid, Document> _documents = new();
     private readonly ConcurrentDictionary<(Guid Id, int Version), DocumentVersion> _versions = new();
 
-    public Task<Document?> GetAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task<Document?> GetAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
         => Task.FromResult(Find(space, documentUniqueId));
 
-    public Task<IReadOnlyList<Document>> ListAsync(Space space, DocumentCursor? after, int limit, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<Document>> ListAsync(Space space, DocumentCursor? after, int limit, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(space);
 
@@ -30,7 +30,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
 
-    public Task<IReadOnlyList<Document>> ListAnyStatusAsync(Space space, int limit, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<Document>> ListAnyStatusAsync(Space space, int limit, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(space);
 
@@ -38,7 +38,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.FromResult<IReadOnlyList<Document>>(result);
     }
 
-    public Task CreateAsync(Document document, DocumentVersion? initialVersion, CancellationToken cancellationToken = default)
+    public Task CreateAsync(Document document, DocumentVersion? initialVersion, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(document);
 
@@ -51,7 +51,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.CompletedTask;
     }
 
-    public Task UpdateCurrentAsync(Document document, DocumentVersion? newVersion, CancellationToken cancellationToken = default)
+    public Task UpdateCurrentAsync(Document document, DocumentVersion? newVersion, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(document);
 
@@ -73,7 +73,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
         var result = Versions(space, documentUniqueId)
             .OrderBy(v => v.VersionNumber)
@@ -81,7 +81,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.FromResult<IReadOnlyList<DocumentVersion>>(result);
     }
 
-    public Task<DocumentVersion?> GetVersionAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
+    public Task<DocumentVersion?> GetVersionAsync(Space space, Guid documentUniqueId, int versionNumber, Actor actor, CancellationToken cancellationToken = default)
     {
         var version = Find(space, documentUniqueId) is not null
             && _versions.TryGetValue((documentUniqueId, versionNumber), out var found)
@@ -90,7 +90,7 @@ internal sealed class InMemoryDocumentStore : IDocumentStore
         return Task.FromResult(version);
     }
 
-    public Task DeleteAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
         if (Find(space, documentUniqueId) is null)
             return Task.CompletedTask;

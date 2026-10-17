@@ -26,7 +26,7 @@ public sealed class PostgreSqlDocumentStoreTests(PostgreSqlFixture database) : I
 
         var document = await harness.Documents.CreateAsync(compartment, "invoice", Upload("hello", "Facture été n°1.txt"), Alice, cancellationToken: Ct);
 
-        var read = await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Ct);
+        var read = await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Alice, Ct);
         Assert.NotNull(read);
         Assert.Equal(("Facture été n°1.txt", "text/plain", 5L, Hash("hello"), 1, DocumentStatus.Active),
             (read.FileName, read.ContentType, read.ContentLength, read.ContentHash, read.VersionNumber, read.Status));
@@ -56,10 +56,10 @@ public sealed class PostgreSqlDocumentStoreTests(PostgreSqlFixture database) : I
 
         await harness.Documents.UpdateContentAsync(compartment, document.DocumentUniqueId, Upload("c2", "contrat-signé.pdf", "application/pdf"), Bob, Ct);
 
-        var versions = await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Ct);
+        var versions = await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Alice, Ct);
         Assert.Equal([(1, "contrat.txt", "text/plain", Hash("c1")), (2, "contrat-signé.pdf", "application/pdf", Hash("c2"))],
             versions.Select(v => (v.VersionNumber, v.FileName, v.ContentType, v.ContentHash)));
-        Assert.Equal(2, (await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Ct))!.VersionNumber);
+        Assert.Equal(2, (await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Alice, Ct))!.VersionNumber);
     }
 
     [Fact]
@@ -70,9 +70,9 @@ public sealed class PostgreSqlDocumentStoreTests(PostgreSqlFixture database) : I
         var document = await harness.Documents.CreateAsync(compartment, "contract", Upload("c1"), Alice, isVersioned: true, cancellationToken: Ct);
 
         var other = NewCompartment();
-        Assert.Null(await harness.Documents.GetAsync(other, document.DocumentUniqueId, Ct));
-        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.GetVersionsAsync(other, document.DocumentUniqueId, Ct));
-        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.OpenVersionContentAsync(other, document.DocumentUniqueId, 1, Ct));
+        Assert.Null(await harness.Documents.GetAsync(other, document.DocumentUniqueId, Alice, Ct));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.GetVersionsAsync(other, document.DocumentUniqueId, Alice, Ct));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.OpenVersionContentAsync(other, document.DocumentUniqueId, 1, Alice, Ct));
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public sealed class PostgreSqlDocumentStoreTests(PostgreSqlFixture database) : I
         string? token = null;
         do
         {
-            var page = await harness.Documents.ListAsync(compartment, token, Ct);
+            var page = await harness.Documents.ListAsync(compartment, Alice, token, Ct);
             seen.AddRange(page.Documents.Select(d => d.DocumentUniqueId));
             token = page.ContinuationToken;
         }
@@ -109,8 +109,8 @@ public sealed class PostgreSqlDocumentStoreTests(PostgreSqlFixture database) : I
         await using var rotated = Harness(activeSlot: 2);
         var after = await rotated.Documents.CreateAsync(compartment, "invoice", Upload("b", "après.txt"), Alice, cancellationToken: Ct);
 
-        Assert.Equal("avant.txt", (await rotated.Documents.GetAsync(compartment, before, Ct))!.FileName);
-        Assert.Equal("après.txt", (await rotated.Documents.GetAsync(compartment, after.DocumentUniqueId, Ct))!.FileName);
+        Assert.Equal("avant.txt", (await rotated.Documents.GetAsync(compartment, before, Alice, Ct))!.FileName);
+        Assert.Equal("après.txt", (await rotated.Documents.GetAsync(compartment, after.DocumentUniqueId, Alice, Ct))!.FileName);
     }
 
     [Fact]
@@ -145,13 +145,13 @@ public sealed class PostgreSqlDocumentStoreTests(PostgreSqlFixture database) : I
         await harness.Documents.UpdateContentAsync(Space.Shared, shared.DocumentUniqueId, Upload("c2"), Bob, Ct);
         var owned = await harness.Documents.CreateAsync(compartment, "invoice", Upload("hello"), Alice, cancellationToken: Ct);
 
-        var read = await harness.Documents.GetAsync(Space.Shared, shared.DocumentUniqueId, Ct);
+        var read = await harness.Documents.GetAsync(Space.Shared, shared.DocumentUniqueId, Alice, Ct);
         Assert.Equal((Space.Shared, 2, Bob), (read!.Space, read.VersionNumber, read.ModifiedBy));
-        Assert.Equal(2, (await harness.Documents.GetVersionsAsync(Space.Shared, shared.DocumentUniqueId, Ct)).Count);
-        Assert.Null(await harness.Documents.GetAsync(compartment, shared.DocumentUniqueId, Ct));
-        Assert.Null(await harness.Documents.GetAsync(Space.Shared, owned.DocumentUniqueId, Ct));
-        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.GetVersionsAsync(compartment, shared.DocumentUniqueId, Ct));
-        Assert.DoesNotContain(owned.DocumentUniqueId, (await harness.Documents.ListAsync(Space.Shared, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
+        Assert.Equal(2, (await harness.Documents.GetVersionsAsync(Space.Shared, shared.DocumentUniqueId, Alice, Ct)).Count);
+        Assert.Null(await harness.Documents.GetAsync(compartment, shared.DocumentUniqueId, Alice, Ct));
+        Assert.Null(await harness.Documents.GetAsync(Space.Shared, owned.DocumentUniqueId, Alice, Ct));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.GetVersionsAsync(compartment, shared.DocumentUniqueId, Alice, Ct));
+        Assert.DoesNotContain(owned.DocumentUniqueId, (await harness.Documents.ListAsync(Space.Shared, Alice, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
     }
 
     [Theory]

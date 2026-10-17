@@ -19,11 +19,11 @@ public sealed class DocumentServiceTests
 
         var document = await harness.Documents.CreateAsync(compartment, "invoice", Upload("hello", "Facture été.txt"), Alice, cancellationToken: Ct);
 
-        var read = await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Ct);
+        var read = await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Alice, Ct);
         Assert.NotNull(read);
         Assert.Equal(("Facture été.txt", "text/plain", 5L, Hash("hello"), 1), (read.FileName, read.ContentType, read.ContentLength, read.ContentHash, read.VersionNumber));
         Assert.Equal(Alice, read.CreatedBy);
-        Assert.Equal("hello", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
+        Assert.Equal("hello", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Alice, Ct)));
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class DocumentServiceTests
         var document = await harness.Documents.CreateAsync(compartment, "note", Upload(string.Empty), Alice, cancellationToken: Ct);
 
         Assert.Equal(0, document.ContentLength);
-        Assert.Equal(string.Empty, await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
+        Assert.Equal(string.Empty, await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Alice, Ct)));
     }
 
     [Fact]
@@ -77,9 +77,9 @@ public sealed class DocumentServiceTests
         var document = await harness.Documents.CreateAsync(compartment, "invoice", Upload("hello"), Alice, cancellationToken: Ct);
 
         var other = NewCompartment();
-        Assert.Null(await harness.Documents.GetAsync(other, document.DocumentUniqueId, Ct));
-        Assert.Empty((await harness.Documents.ListAsync(other, cancellationToken: Ct)).Documents);
-        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.OpenContentAsync(other, document.DocumentUniqueId, Ct));
+        Assert.Null(await harness.Documents.GetAsync(other, document.DocumentUniqueId, Alice, Ct));
+        Assert.Empty((await harness.Documents.ListAsync(other, Alice, cancellationToken: Ct)).Documents);
+        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.OpenContentAsync(other, document.DocumentUniqueId, Alice, Ct));
         await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.UpdateContentAsync(other, document.DocumentUniqueId, Upload("x"), Mallory, Ct));
         await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.TrashAsync(other, document.DocumentUniqueId, Mallory, Ct));
     }
@@ -91,8 +91,8 @@ public sealed class DocumentServiceTests
 
         var document = await harness.Documents.CreateAsync(Space.Shared, "logo", Upload("svg"), Actor.Parse("system"), cancellationToken: Ct);
 
-        Assert.Equal(Space.Shared, (await harness.Documents.GetAsync(Space.Shared, document.DocumentUniqueId, Ct))!.Space);
-        Assert.Equal("svg", await ReadAsync(await harness.Documents.OpenContentAsync(Space.Shared, document.DocumentUniqueId, Ct)));
+        Assert.Equal(Space.Shared, (await harness.Documents.GetAsync(Space.Shared, document.DocumentUniqueId, Alice, Ct))!.Space);
+        Assert.Equal("svg", await ReadAsync(await harness.Documents.OpenContentAsync(Space.Shared, document.DocumentUniqueId, Alice, Ct)));
         var stored = Assert.Single(Directory.GetFiles(harness.BlobRoot, "*", SearchOption.AllDirectories));
         Assert.Equal("_shared", Path.GetRelativePath(harness.BlobRoot, stored).Split(Path.DirectorySeparatorChar)[0]);
     }
@@ -105,11 +105,11 @@ public sealed class DocumentServiceTests
         var shared = await harness.Documents.CreateAsync(Space.Shared, "logo", Upload("svg"), Alice, cancellationToken: Ct);
         var owned = await harness.Documents.CreateAsync(compartment, "invoice", Upload("hello"), Alice, cancellationToken: Ct);
 
-        Assert.Null(await harness.Documents.GetAsync(compartment, shared.DocumentUniqueId, Ct));
-        Assert.Null(await harness.Documents.GetAsync(Space.Shared, owned.DocumentUniqueId, Ct));
-        Assert.Equal([owned.DocumentUniqueId], (await harness.Documents.ListAsync(compartment, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
-        Assert.Contains(shared.DocumentUniqueId, (await harness.Documents.ListAsync(Space.Shared, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
-        Assert.DoesNotContain(owned.DocumentUniqueId, (await harness.Documents.ListAsync(Space.Shared, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
+        Assert.Null(await harness.Documents.GetAsync(compartment, shared.DocumentUniqueId, Alice, Ct));
+        Assert.Null(await harness.Documents.GetAsync(Space.Shared, owned.DocumentUniqueId, Alice, Ct));
+        Assert.Equal([owned.DocumentUniqueId], (await harness.Documents.ListAsync(compartment, Alice, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
+        Assert.Contains(shared.DocumentUniqueId, (await harness.Documents.ListAsync(Space.Shared, Alice, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
+        Assert.DoesNotContain(owned.DocumentUniqueId, (await harness.Documents.ListAsync(Space.Shared, Alice, cancellationToken: Ct)).Documents.Select(d => d.DocumentUniqueId));
     }
 
     [Fact]
@@ -122,10 +122,10 @@ public sealed class DocumentServiceTests
         var updated = await harness.Documents.UpdateContentAsync(compartment, document.DocumentUniqueId, Upload("c2", "contrat-signé.pdf", "application/pdf"), Bob, Ct);
 
         Assert.Equal(2, updated.VersionNumber);
-        Assert.Equal("c2", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
-        var versions = await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Ct);
+        Assert.Equal("c2", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Alice, Ct)));
+        var versions = await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Alice, Ct);
         Assert.Equal([(1, "contrat.txt", Hash("c1")), (2, "contrat-signé.pdf", Hash("c2"))], versions.Select(v => (v.VersionNumber, v.FileName, v.ContentHash)));
-        Assert.Equal("c1", await ReadAsync(await harness.Documents.OpenVersionContentAsync(compartment, document.DocumentUniqueId, 1, Ct)));
+        Assert.Equal("c1", await ReadAsync(await harness.Documents.OpenVersionContentAsync(compartment, document.DocumentUniqueId, 1, Alice, Ct)));
         Assert.Equal([$"{document.DocumentUniqueId:N}-1", $"{document.DocumentUniqueId:N}-2"], harness.BlobNames().Order());
     }
 
@@ -139,8 +139,8 @@ public sealed class DocumentServiceTests
         var updated = await harness.Documents.UpdateContentAsync(compartment, document.DocumentUniqueId, Upload("m2"), Bob, Ct);
 
         Assert.Equal(2, updated.VersionNumber);
-        Assert.Equal("m2", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
-        Assert.Empty(await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Ct));
+        Assert.Equal("m2", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Alice, Ct)));
+        Assert.Empty(await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Alice, Ct));
         Assert.Equal([$"{document.DocumentUniqueId:N}-2"], harness.BlobNames());
     }
 
@@ -154,7 +154,7 @@ public sealed class DocumentServiceTests
         var again = await harness.Documents.UpdateContentAsync(compartment, document.DocumentUniqueId, Upload("same", "b.txt"), Bob, Ct);
 
         Assert.Equal((1, "a.txt"), (again.VersionNumber, again.FileName));
-        Assert.Single(await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Ct));
+        Assert.Single(await harness.Documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Alice, Ct));
         Assert.Equal([$"{document.DocumentUniqueId:N}-1"], harness.BlobNames());
     }
 
@@ -183,7 +183,7 @@ public sealed class DocumentServiceTests
             harness.Documents.CreateAsync(compartment, "invoice", Upload("hello", expectedHash: Hash("something else")), Alice, cancellationToken: Ct));
 
         Assert.Equal(ErrorType.Validation, refused.Type);
-        Assert.Empty((await harness.Documents.ListAsync(compartment, cancellationToken: Ct)).Documents);
+        Assert.Empty((await harness.Documents.ListAsync(compartment, Alice, cancellationToken: Ct)).Documents);
         Assert.Empty(harness.BlobNames());
     }
 
@@ -197,7 +197,7 @@ public sealed class DocumentServiceTests
         await Assert.ThrowsAsync<UserFacingException>(() =>
             harness.Documents.UpdateContentAsync(compartment, document.DocumentUniqueId, Upload("m2", expectedHash: Hash("other")), Bob, Ct));
 
-        Assert.Equal("m1", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
+        Assert.Equal("m1", await ReadAsync(await harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Alice, Ct)));
         Assert.Equal([$"{document.DocumentUniqueId:N}-1"], harness.BlobNames());
     }
 
@@ -221,7 +221,7 @@ public sealed class DocumentServiceTests
         foreach (var file in Directory.GetFiles(harness.BlobRoot, "*", SearchOption.AllDirectories))
             File.Delete(file);
 
-        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ct));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(() => harness.Documents.OpenContentAsync(compartment, document.DocumentUniqueId, Alice, Ct));
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public sealed class DocumentServiceTests
         string? token = null;
         do
         {
-            var page = await harness.Documents.ListAsync(compartment, token, Ct);
+            var page = await harness.Documents.ListAsync(compartment, Alice, token, Ct);
             Assert.True(page.Documents.Count <= 2);
             seen.AddRange(page.Documents.Select(d => d.DocumentUniqueId));
             token = page.ContinuationToken;
@@ -257,7 +257,7 @@ public sealed class DocumentServiceTests
     {
         await using var harness = DocumentsHarness.InMemory();
 
-        var refused = await Assert.ThrowsAsync<UserFacingException>(() => harness.Documents.ListAsync(NewCompartment(), token, Ct));
+        var refused = await Assert.ThrowsAsync<UserFacingException>(() => harness.Documents.ListAsync(NewCompartment(), Alice, token, Ct));
 
         Assert.Equal(ErrorType.Validation, refused.Type);
     }
@@ -271,8 +271,8 @@ public sealed class DocumentServiceTests
 
         await harness.Documents.TrashAsync(compartment, document.DocumentUniqueId, Bob, Ct);
 
-        Assert.Empty((await harness.Documents.ListAsync(compartment, cancellationToken: Ct)).Documents);
-        Assert.Equal(DocumentStatus.Trashed, (await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Ct))!.Status);
+        Assert.Empty((await harness.Documents.ListAsync(compartment, Alice, cancellationToken: Ct)).Documents);
+        Assert.Equal(DocumentStatus.Trashed, (await harness.Documents.GetAsync(compartment, document.DocumentUniqueId, Alice, Ct))!.Status);
         Assert.Single(harness.BlobNames());
         await Assert.ThrowsAsync<DocumentNotFoundException>(() =>
             harness.Documents.UpdateContentAsync(compartment, document.DocumentUniqueId, Upload("again"), Bob, Ct));
@@ -291,7 +291,7 @@ public sealed class DocumentServiceTests
 
         Assert.Equal(2, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
 
-        Assert.Null(await harness.Documents.GetAsync(compartment, versioned.DocumentUniqueId, Ct));
+        Assert.Null(await harness.Documents.GetAsync(compartment, versioned.DocumentUniqueId, Alice, Ct));
         Assert.Equal([$"{kept.DocumentUniqueId:N}-1"], harness.BlobNames());
         Assert.Equal(0, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
     }
@@ -318,7 +318,7 @@ public sealed class DocumentServiceTests
 
         Assert.Equal(1, await harness.Documents.PurgeCompartmentAsync(compartment, Purger, Ct));
 
-        Assert.NotNull(await harness.Documents.GetAsync(Space.Shared, shared.DocumentUniqueId, Ct));
+        Assert.NotNull(await harness.Documents.GetAsync(Space.Shared, shared.DocumentUniqueId, Alice, Ct));
         Assert.Equal([$"{shared.DocumentUniqueId:N}-1"], harness.BlobNames());
     }
 

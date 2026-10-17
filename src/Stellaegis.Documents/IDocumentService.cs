@@ -11,7 +11,10 @@ namespace Stellaegis.Documents;
 /// Every operation names its <see cref="Space"/> — a <see cref="Compartment"/> the documents belong to, or
 /// <see cref="Space.Shared"/> for the documents that belong to no compartment — and only ever sees the
 /// documents of that space. The space must come from a trusted source (the host's resolution of the
-/// caller), never from user input. The actor of a change is recorded on the document.
+/// caller), never from user input.
+/// <para>Every operation also names its <see cref="Actor"/>, reads included. The actor of a change is recorded on
+/// the document, and the store hands the actor of every call to the database, which can then isolate the
+/// documents of one actor from another's.</para>
 /// </remarks>
 public interface IDocumentService
 {
@@ -31,25 +34,25 @@ public interface IDocumentService
 
     /// <summary>Opens the current content of a document.</summary>
     /// <exception cref="DocumentNotFoundException">No document with that id for the space.</exception>
-    Task<Stream> OpenContentAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default);
+    Task<Stream> OpenContentAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default);
 
     /// <summary>Opens the content of a specific version.</summary>
     /// <exception cref="DocumentNotFoundException">No such document or version for the space.</exception>
-    Task<Stream> OpenVersionContentAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default);
+    Task<Stream> OpenVersionContentAsync(Space space, Guid documentUniqueId, int versionNumber, Actor actor, CancellationToken cancellationToken = default);
 
     /// <summary>Gets a document's metadata, or <see langword="null"/> when the space has no such document.</summary>
-    Task<Document?> GetAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default);
+    Task<Document?> GetAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lists one page of the space's active documents, most recent first. Pass the previous page's
     /// <see cref="DocumentPage.ContinuationToken"/> to get the next one.
     /// </summary>
     /// <exception cref="UserFacingException"><paramref name="continuationToken"/> is not a token this service issued.</exception>
-    Task<DocumentPage> ListAsync(Space space, string? continuationToken = null, CancellationToken cancellationToken = default);
+    Task<DocumentPage> ListAsync(Space space, Actor actor, string? continuationToken = null, CancellationToken cancellationToken = default);
 
     /// <summary>Lists a document's version history.</summary>
     /// <exception cref="DocumentNotFoundException">No document with that id for the space.</exception>
-    Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default);
 
     /// <summary>Marks a document as trashed.</summary>
     /// <exception cref="DocumentNotFoundException">No document with that id for the space.</exception>

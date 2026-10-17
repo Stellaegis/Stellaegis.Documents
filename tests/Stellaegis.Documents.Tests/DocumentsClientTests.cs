@@ -23,8 +23,8 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         var document = await documents.CreateAsync(compartment, "invoice", Upload("hello", "Facture été.txt"), Ignored, cancellationToken: Ct);
 
         Assert.Equal((Space.Of(compartment), "Facture été.txt", 1, Actor.Parse("alice")), (document.Space, document.FileName, document.VersionNumber, document.CreatedBy));
-        Assert.Equal("hello", await ReadAsync(await documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
-        Assert.Equal(5, (await documents.GetAsync(compartment, document.DocumentUniqueId, Ct))!.ContentLength);
+        Assert.Equal("hello", await ReadAsync(await documents.OpenContentAsync(compartment, document.DocumentUniqueId, Ignored, Ct)));
+        Assert.Equal(5, (await documents.GetAsync(compartment, document.DocumentUniqueId, Ignored, Ct))!.ContentLength);
     }
 
     [Fact]
@@ -34,9 +34,9 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         var compartment = NewCompartment();
         var document = await documents.CreateAsync(compartment, "invoice", Upload("hello"), Ignored, cancellationToken: Ct);
 
-        Assert.Null(await documents.GetAsync(NewCompartment(), document.DocumentUniqueId, Ct));
-        await Assert.ThrowsAsync<DocumentNotFoundException>(() => documents.OpenContentAsync(compartment, Guid.NewGuid(), Ct));
-        var refused = await Assert.ThrowsAsync<UserFacingException>(() => documents.ListAsync(compartment, "not*a*token", Ct));
+        Assert.Null(await documents.GetAsync(NewCompartment(), document.DocumentUniqueId, Ignored, Ct));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(() => documents.OpenContentAsync(compartment, Guid.NewGuid(), Ignored, Ct));
+        var refused = await Assert.ThrowsAsync<UserFacingException>(() => documents.ListAsync(compartment, Ignored, "not*a*token", Ct));
         Assert.Equal(ErrorType.Validation, refused.Type);
     }
 
@@ -50,9 +50,9 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         var updated = await documents.UpdateContentAsync(compartment, document.DocumentUniqueId, Upload("c2", "contrat-signé.pdf", "application/pdf"), Ignored, Ct);
 
         Assert.Equal(2, updated.VersionNumber);
-        var versions = await documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Ct);
+        var versions = await documents.GetVersionsAsync(compartment, document.DocumentUniqueId, Ignored, Ct);
         Assert.Equal([(1, Hash("c1")), (2, Hash("c2"))], versions.Select(v => (v.VersionNumber, v.ContentHash)));
-        Assert.Equal("c1", await ReadAsync(await documents.OpenVersionContentAsync(compartment, document.DocumentUniqueId, 1, Ct)));
+        Assert.Equal("c1", await ReadAsync(await documents.OpenVersionContentAsync(compartment, document.DocumentUniqueId, 1, Ignored, Ct)));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         string? token = null;
         do
         {
-            var page = await documents.ListAsync(compartment, token, Ct);
+            var page = await documents.ListAsync(compartment, Ignored, token, Ct);
             seen += page.Documents.Count;
             token = page.ContinuationToken;
         }
@@ -83,8 +83,8 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         var document = await host.Client("alice").CreateAsync(compartment, "note", Upload("intact"), Ignored, cancellationToken: Ct);
 
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await ReadAsync(await host.Client("alice", damage: true).OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
-        Assert.Equal("intact", await ReadAsync(await host.Client("alice").OpenContentAsync(compartment, document.DocumentUniqueId, Ct)));
+            await ReadAsync(await host.Client("alice", damage: true).OpenContentAsync(compartment, document.DocumentUniqueId, Ignored, Ct)));
+        Assert.Equal("intact", await ReadAsync(await host.Client("alice").OpenContentAsync(compartment, document.DocumentUniqueId, Ignored, Ct)));
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         await documents.CreateAsync(compartment, "note", Upload("k"), Ignored, cancellationToken: Ct);
 
         await documents.TrashAsync(compartment, trashed.DocumentUniqueId, Ignored, Ct);
-        Assert.Single((await documents.ListAsync(compartment, cancellationToken: Ct)).Documents);
+        Assert.Single((await documents.ListAsync(compartment, Ignored, cancellationToken: Ct)).Documents);
 
         var refused = await Assert.ThrowsAsync<UserFacingException>(() => documents.PurgeCompartmentAsync(compartment, Ignored, Ct));
         Assert.Equal(ErrorType.Forbidden, refused.Type);
@@ -113,9 +113,9 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         var owned = await documents.CreateAsync(compartment, "invoice", Upload("hello"), Ignored, cancellationToken: Ct);
 
         Assert.Equal(Space.Shared, shared.Space);
-        Assert.Equal("svg", await ReadAsync(await documents.OpenContentAsync(Space.Shared, shared.DocumentUniqueId, Ct)));
-        Assert.Null(await documents.GetAsync(compartment, shared.DocumentUniqueId, Ct));
-        Assert.Null(await documents.GetAsync(Space.Shared, owned.DocumentUniqueId, Ct));
+        Assert.Equal("svg", await ReadAsync(await documents.OpenContentAsync(Space.Shared, shared.DocumentUniqueId, Ignored, Ct)));
+        Assert.Null(await documents.GetAsync(compartment, shared.DocumentUniqueId, Ignored, Ct));
+        Assert.Null(await documents.GetAsync(Space.Shared, owned.DocumentUniqueId, Ignored, Ct));
     }
 
     [Fact]
@@ -124,9 +124,9 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         var withoutShared = host.Client("alice", shared: false);
         var withoutCompartments = host.Client("alice", compartments: false);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => withoutShared.ListAsync(Space.Shared, cancellationToken: Ct));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => withoutCompartments.ListAsync(NewCompartment(), cancellationToken: Ct));
-        Assert.Empty((await withoutShared.ListAsync(NewCompartment(), cancellationToken: Ct)).Documents);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => withoutShared.ListAsync(Space.Shared, Ignored, cancellationToken: Ct));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => withoutCompartments.ListAsync(NewCompartment(), Ignored, cancellationToken: Ct));
+        Assert.Empty((await withoutShared.ListAsync(NewCompartment(), Ignored, cancellationToken: Ct)).Documents);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class DocumentsClientTests(DocumentsHost host) : IClassFixture<Doc
         await host.Client("alice").CreateAsync(compartment, "note", Upload("k"), Ignored, cancellationToken: Ct);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => host.Client("ops", "admin", admin: false).PurgeCompartmentAsync(compartment, Ignored, Ct));
-        Assert.Single((await host.Client("alice").ListAsync(compartment, cancellationToken: Ct)).Documents);
+        Assert.Single((await host.Client("alice").ListAsync(compartment, Ignored, cancellationToken: Ct)).Documents);
     }
 
     [Fact]

@@ -35,6 +35,14 @@ Built on Stellaegis.Primitives 3.0.0 and Stellaegis.Blobs 3.0.0.
   when the service is built.
 - **Breaking:** `DocumentOperations.Module` becomes `Target`: the first argument of an `Operation` is the type
   of data it acts on. Its value, `documents`, and the operation names do not change.
+- **Breaking:** every operation of `IDocumentService` takes an `Actor`, reads included: `GetAsync`, `ListAsync`
+  (`ListAsync(space, actor, continuationToken)`), `OpenContentAsync`, `OpenVersionContentAsync` and
+  `GetVersionsAsync`. Every method of `IDocumentStore` takes one too. The client does not send it: the server
+  takes the authenticated caller.
+- The PostgreSQL store opens every call through `AdoSpaceUnitOfWorkFactory` of Stellaegis.Primitives.Data: the
+  space and the actor are set in the session context of the connection, `stellaegis.space` and
+  `stellaegis.actor`, for row-level security, audit triggers or functions of the database to read. The
+  in-memory store ignores the actor of a read.
 - Depends on Stellaegis.Primitives 3.0.0, Stellaegis.Primitives.Data 3.0.0, Stellaegis.Primitives.AspNetCore
   3.0.0 and Stellaegis.Blobs 3.0.0. The startup check of Stellaegis.Primitives.AspNetCore now refuses a route
   without an authorization requirement: a host relying on its fallback policy declares `RequireAuthorization()`

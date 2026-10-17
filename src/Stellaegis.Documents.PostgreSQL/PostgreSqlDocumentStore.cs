@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Dapper;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -12,7 +13,12 @@ namespace Stellaegis.Documents.PostgreSQL;
 /// atomic operations (create with a first version, pointer move with a new revision) run in a transaction
 /// so the current pointer and the history never diverge. File names are encrypted with pgcrypto.
 /// </summary>
-internal sealed class PostgreSqlDocumentStore : IDocumentStore
+/// <remarks>
+/// Each call opens a unit of work of <c>Stellaegis.Primitives.Data</c> in its space, for its actor: both are set
+/// in the session context of the connection, <c>stellaegis.space</c> and <c>stellaegis.actor</c>, where the
+/// row-level security of the schema reads them.
+/// </remarks>
+internal sealed class PostgreSqlDocumentStore : IDocumentStore, IAsyncDisposable, IDisposable
 {
     // pgp_sym_decrypt receives only the passphrase of the row's own slot: an unconfigured retired slot
     // never reaches it unless a row still uses that slot.
@@ -28,7 +34,11 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         "v.document_unique_id, v.version_number, " +
         string.Format(DecryptFileName, "v") + ", v.content_type, v.content_length, v.content_hash, v.created_at, v.created_by";
 
-    private readonly string _connectionString;
+    private static readonly RepositoryRegistry<DocumentsDatabase> Registry = new RepositoryRegistry<DocumentsDatabase>()
+        .Add<Session>((connection, transaction) => new Session(connection, transaction));
+
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly AdoSpaceUnitOfWorkFactory<DocumentsDatabase> _units;
     private readonly int _activeKeySlot;
     private readonly string _activePassphrase;
     private readonly string _passphrase1;
@@ -44,28 +54,33 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
     public PostgreSqlDocumentStore(IOptions<DocumentsDatabaseOptions> options)
     {
         var value = Guard.NotNull(options).Value;
-        _connectionString = Guard.Satisfies(value.ConnectionString, cs => !string.IsNullOrWhiteSpace(cs),
+        var connectionString = Guard.Satisfies(value.ConnectionString, cs => !string.IsNullOrWhiteSpace(cs),
             $"{DocumentsDatabaseOptions.SectionName}:{nameof(DocumentsDatabaseOptions.ConnectionString)} is required.");
         _activeKeySlot = Guard.Satisfies(value.ActiveKeySlot, slot => slot is 1 or 2,
             $"{DocumentsDatabaseOptions.SectionName}:{nameof(DocumentsDatabaseOptions.ActiveKeySlot)} must be 1 or 2.");
         _activePassphrase = value.GetPassphrase(_activeKeySlot);
         _passphrase1 = value.GetPassphrase(1);
         _passphrase2 = value.GetPassphrase(2);
+
+        _dataSource = NpgsqlDataSource.Create(connectionString);
+        _units = new AdoSpaceUnitOfWorkFactory<DocumentsDatabase>(_dataSource, Registry, SessionContext.PostgreSql);
     }
 
     /// <inheritdoc />
-    public async Task<Document?> GetAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<Document?> GetAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        var row = await connection.QuerySingleOrDefaultAsync<DocumentRow>(new CommandDefinition(
+        await using var uow = await _units.OpenAsync(space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
+        var row = await db.Connection.QuerySingleOrDefaultAsync<DocumentRow>(new CommandDefinition(
             $"select {DocumentColumns} from doc.documents d where {InSpace(space)} and d.document_unique_id = @documentUniqueId",
             WithPassphrases(new { compartment = space.Compartment?.Value, documentUniqueId }),
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
         return row?.ToDocument();
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<Document>> ListAsync(Space space, DocumentCursor? after, int limit, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Document>> ListAsync(Space space, DocumentCursor? after, int limit, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(space);
 
@@ -74,8 +89,9 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             ? string.Empty
             : "and (d.created_at, d.document_unique_id) < (@afterCreatedAt, @afterDocumentUniqueId)";
 
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        var rows = await connection.QueryAsync<DocumentRow>(new CommandDefinition(
+        await using var uow = await _units.OpenAsync(space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
+        var rows = await db.Connection.QueryAsync<DocumentRow>(new CommandDefinition(
             $"""
             select {DocumentColumns}
             from doc.documents d
@@ -84,32 +100,35 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             limit @limit
             """,
             WithPassphrases(new { compartment = space.Compartment?.Value, afterCreatedAt = after?.CreatedAt, afterDocumentUniqueId = after?.DocumentUniqueId, limit }),
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
         return rows.Select(r => r.ToDocument()).ToList();
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<Document>> ListAnyStatusAsync(Space space, int limit, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Document>> ListAnyStatusAsync(Space space, int limit, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(space);
 
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        var rows = await connection.QueryAsync<DocumentRow>(new CommandDefinition(
+        await using var uow = await _units.OpenAsync(space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
+        var rows = await db.Connection.QueryAsync<DocumentRow>(new CommandDefinition(
             $"select {DocumentColumns} from doc.documents d where {InSpace(space)} limit @limit",
             WithPassphrases(new { compartment = space.Compartment?.Value, limit }),
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
         return rows.Select(r => r.ToDocument()).ToList();
     }
 
     /// <inheritdoc />
-    public async Task CreateAsync(Document document, DocumentVersion? initialVersion, CancellationToken cancellationToken = default)
+    public async Task CreateAsync(Document document, DocumentVersion? initialVersion, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(document);
 
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using var uow = await _units.OpenAndBeginAsync(document.Space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
 
-        await connection.ExecuteAsync(new CommandDefinition(
+        await db.Connection.ExecuteAsync(new CommandDefinition(
             """
             insert into doc.documents
               (document_unique_id, compartment, document_type, version_number, content_hash, file_name, content_type,
@@ -138,24 +157,24 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
                 document.ModifiedAt,
                 ModifiedBy = document.ModifiedBy?.Value,
             },
-            transaction,
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         if (initialVersion is not null)
-            await InsertVersionAsync(connection, transaction, initialVersion, cancellationToken).ConfigureAwait(false);
+            await InsertVersionAsync(db, initialVersion, cancellationToken).ConfigureAwait(false);
 
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task UpdateCurrentAsync(Document document, DocumentVersion? newVersion, CancellationToken cancellationToken = default)
+    public async Task UpdateCurrentAsync(Document document, DocumentVersion? newVersion, Actor actor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(document);
 
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using var uow = await _units.OpenAndBeginAsync(document.Space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
 
-        var moved = await connection.ExecuteAsync(new CommandDefinition(
+        var moved = await db.Connection.ExecuteAsync(new CommandDefinition(
             $"""
             update doc.documents
             set version_number = @VersionNumber, content_hash = @ContentHash,
@@ -178,7 +197,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
                 compartment = document.Space.Compartment?.Value,
                 document.DocumentUniqueId,
             },
-            transaction,
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         // No document in that space: nothing moved, and no revision may be attached to it.
@@ -186,30 +205,33 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             return;
 
         if (newVersion is not null)
-            await InsertVersionAsync(connection, transaction, newVersion, cancellationToken).ConfigureAwait(false);
+            await InsertVersionAsync(db, newVersion, cancellationToken).ConfigureAwait(false);
 
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task SetStatusAsync(Space space, Guid documentUniqueId, DocumentStatus status, Actor modifiedBy, DateTimeOffset modifiedAt, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        await connection.ExecuteAsync(new CommandDefinition(
+        await using var uow = await _units.OpenAsync(space, modifiedBy, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
+        await db.Connection.ExecuteAsync(new CommandDefinition(
             $"""
             update doc.documents
             set status = @status::doc.document_status, modified_by = @modifiedBy, modified_at = @modifiedAt
             where {InSpace(space, alias: null)} and document_unique_id = @documentUniqueId
             """,
             new { compartment = space.Compartment?.Value, documentUniqueId, status = StatusText(status), modifiedBy = modifiedBy.Value, modifiedAt },
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DocumentVersion>> GetVersionsAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        var rows = await connection.QueryAsync<VersionRow>(new CommandDefinition(
+        await using var uow = await _units.OpenAsync(space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
+        var rows = await db.Connection.QueryAsync<VersionRow>(new CommandDefinition(
             $"""
             select {VersionColumns}
             from doc.document_versions v
@@ -218,15 +240,17 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             order by v.version_number
             """,
             WithPassphrases(new { compartment = space.Compartment?.Value, documentUniqueId }),
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
         return rows.Select(r => r.ToVersion()).ToList();
     }
 
     /// <inheritdoc />
-    public async Task<DocumentVersion?> GetVersionAsync(Space space, Guid documentUniqueId, int versionNumber, CancellationToken cancellationToken = default)
+    public async Task<DocumentVersion?> GetVersionAsync(Space space, Guid documentUniqueId, int versionNumber, Actor actor, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        var row = await connection.QuerySingleOrDefaultAsync<VersionRow>(new CommandDefinition(
+        await using var uow = await _units.OpenAsync(space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
+        var row = await db.Connection.QuerySingleOrDefaultAsync<VersionRow>(new CommandDefinition(
             $"""
             select {VersionColumns}
             from doc.document_versions v
@@ -234,24 +258,31 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
             where {InSpace(space)} and v.document_unique_id = @documentUniqueId and v.version_number = @versionNumber
             """,
             WithPassphrases(new { compartment = space.Compartment?.Value, documentUniqueId, versionNumber }),
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
         return row?.ToVersion();
     }
 
     /// <inheritdoc />
-    public async Task DeleteAsync(Space space, Guid documentUniqueId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(Space space, Guid documentUniqueId, Actor actor, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var uow = await _units.OpenAsync(space, actor, cancellationToken).ConfigureAwait(false);
+        var db = uow.Repo<Session>();
 
         // The versions go with their document (on delete cascade), in the same statement.
-        await connection.ExecuteAsync(new CommandDefinition(
+        await db.Connection.ExecuteAsync(new CommandDefinition(
             $"delete from doc.documents where {InSpace(space, alias: null)} and document_unique_id = @documentUniqueId",
             new { compartment = space.Compartment?.Value, documentUniqueId },
+            db.Transaction,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
-    private Task InsertVersionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, DocumentVersion version, CancellationToken cancellationToken)
-        => connection.ExecuteAsync(new CommandDefinition(
+    public ValueTask DisposeAsync() => _dataSource.DisposeAsync();
+
+    public void Dispose() => _dataSource.Dispose();
+
+    private Task InsertVersionAsync(Session db, DocumentVersion version, CancellationToken cancellationToken)
+        => db.Connection.ExecuteAsync(new CommandDefinition(
             """
             insert into doc.document_versions
               (document_unique_id, version_number, file_name, content_type, content_length, content_hash, key_slot,
@@ -273,7 +304,7 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
                 version.CreatedAt,
                 CreatedBy = version.CreatedBy.Value,
             },
-            transaction,
+            db.Transaction,
             cancellationToken: cancellationToken));
 
     // The shared space is stored as a null compartment, which "= @compartment" never matches: each kind of
@@ -292,13 +323,6 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         return all;
     }
 
-    private async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken)
-    {
-        var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        return connection;
-    }
-
     private static string StatusText(DocumentStatus status) => status switch
     {
         DocumentStatus.Active => "active",
@@ -312,6 +336,20 @@ internal sealed class PostgreSqlDocumentStore : IDocumentStore
         "trashed" => DocumentStatus.Trashed,
         _ => throw new InvalidOperationException($"Unknown document status '{status}' in doc.documents."),
     };
+
+    /// <summary>The marker of the database holding the <c>doc</c> schema.</summary>
+    private sealed class DocumentsDatabase;
+
+    /// <summary>
+    /// The connection of a unit of work and its current transaction, read at each command: the store's only
+    /// "repository", since its queries need nothing more.
+    /// </summary>
+    private sealed class Session(DbConnection connection, Func<DbTransaction?> transaction)
+    {
+        public DbConnection Connection { get; } = connection;
+
+        public DbTransaction? Transaction => transaction();
+    }
 
     private sealed class DocumentRow
     {
